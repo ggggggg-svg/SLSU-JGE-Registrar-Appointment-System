@@ -591,6 +591,77 @@ details.cg>summary::-webkit-details-marker{display:none}
  table.rt td{display:flex;justify-content:space-between;gap:1rem;white-space:normal;text-align:right;border:0;padding:.45rem 0;min-width:0;max-width:none}
  table.rt td::before{content:attr(data-label);font-weight:600;color:var(--mut);text-align:left;flex:none}
 }
+
+/* ========== MOBILE RESPONSIVE STYLES (phones / cellphone browsers) ========== */
+html{-webkit-text-size-adjust:100%}
+img,svg,canvas,video{max-width:100%}
+@media only screen and (max-width:768px){
+  html,body{overflow-x:hidden}
+  body{padding:0}
+
+  /* Header - stack items vertically */
+  .header-main{flex-direction:column;align-items:center;text-align:center;padding:12px;gap:10px;position:static}
+  .logo-group{justify-content:center}
+  .header-main nav{width:100%;margin-top:4px}
+  .user-area{justify-content:center;flex-wrap:wrap}
+  .user-badge{max-width:100%}
+
+  /* Navigation - make links wrap nicely, easy to tap */
+  .nav-menu{flex-wrap:wrap;justify-content:center;gap:6px}
+  .nav-menu a,.mb{font-size:14px;padding:8px 12px;min-height:40px;display:flex;align-items:center;justify-content:center}
+  .dd{position:fixed;left:12px;right:12px;min-width:0;margin-top:6px;max-height:60vh;overflow:auto}
+
+  /* Main content - better spacing on small screens */
+  .page-container{padding:15px;max-width:100%}
+  .content{padding:12px}
+
+  /* Headings - adjust size */
+  .lh h1{font-size:20px}
+  h2.t{font-size:18px;margin-bottom:1rem}
+  .ct,h3.sub,.pn>h3{font-size:16px}
+
+  /* Cards - full width on mobile */
+  .card,.pn{width:100%;margin:10px 0;padding:14px}
+  .grid{grid-template-columns:1fr}
+  .banner{aspect-ratio:auto}
+  .banner img{height:auto;object-fit:contain}
+
+  /* Forms - 16px stops iPhone from zooming in, bigger tap targets */
+  input,select,textarea{font-size:16px;padding:.8rem .9rem}
+  input[type=checkbox],input[type=radio]{width:auto;min-height:0}
+
+  /* Buttons - easier to tap (small table/icon buttons keep their size) */
+  form .btn:not(.btn-sm),.btn-full,.btn-danger.btn-full{width:100%;padding:12px;font-size:16px}
+  .btn-sm{min-height:38px;padding:.5rem .9rem}
+  table.rt td[data-label="Action"]{flex-wrap:wrap;justify-content:flex-end;gap:.5rem}
+  table.rt td .nm{justify-content:flex-end}
+
+  /* Grouped lists, dialogs, footer */
+  details.cg>summary{padding:.8rem;font-size:.9rem}
+  .yg{padding:.2rem .8rem 1rem}
+  .modal{padding:.5rem}
+  .mbox,.mbox.wide{max-width:100%;padding:1.1rem}
+  .mbox.wide{max-height:92vh}
+  .footer{padding:1.2rem 1rem calc(1.2rem + env(safe-area-inset-bottom));font-size:.78rem}
+
+  /* Admin dashboard */
+  .tb{gap:.6rem}
+  .gs{max-width:none;min-width:0}
+  .tiles{gap:.7rem}.tile b{font-size:1.35rem}
+  .filtbar{gap:.5rem}.sbx{min-width:0;flex-basis:100%}
+  .filtbar select{width:100%;max-width:none;min-width:0}
+  .act .when{display:none}
+}
+@media only screen and (max-width:480px){
+  .top-bar{font-size:.68rem;padding:.4rem .6rem}
+  .logo-text h1{font-size:.9rem}
+  .av-row{justify-content:center;text-align:center}
+  .pm-head{flex-direction:column;text-align:center}
+  .stp{gap:.7rem}.stp .n{width:30px;height:30px;font-size:.85rem}
+  .alert{padding:.8rem;gap:.6rem}
+  .reqbox,.rq-key{padding:.8rem}
+  .tiles{grid-template-columns:1fr 1fr}
+}
 """
 
 HEAD_LINKS = ('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">'
@@ -1083,7 +1154,7 @@ form.in{display:inline}
  .hamb{display:inline-flex;align-items:center;justify-content:center}
  .tb{padding:.7rem 1rem}.content{padding:1rem}.who span{display:none}
 }
-@media(max-width:560px){.tiles{grid-template-columns:1fr}}
+@media(max-width:560px){.tiles{grid-template-columns:1fr 1fr}.ax.bx{font-size:17px}.tile{padding:.9rem}.tile i{font-size:1.4rem}}
 </style></head><body class="adm">
 """ + BLUR_BG + """
 {% macro who(name, sid, av) %}<div class="nm">{% if av %}<img src="{{ av }}" alt="">{% else %}<span class="avi"><i class="fas fa-user"></i></span>{% endif %}<a href="#" class="plink" data-sid="{{ sid }}">{{ name }}</a></div>{% endmacro %}
@@ -1260,12 +1331,12 @@ const CH={{ chart|tojson }},DN={{ donut|tojson }};
 (function(){const el=document.getElementById('barc');if(!el)return;
  const W=640,H=250,L=34,B=26,T=10,mx=Math.max(4,...CH.p,...CH.c),step=Math.ceil(mx/4),top=step*4;let s='';
  for(let i=0;i<=4;i++){const y=T+(H-T-B)*(1-i/4);
-  s+='<line class="gl" x1="'+L+'" x2="'+W+'" y1="'+y+'" y2="'+y+'"/><text class="ax" x="'+(L-6)+'" y="'+(y+3)+'" text-anchor="end">'+(step*i)+'</text>'}
+  s+='<line class="gl" x1="'+L+'" x2="'+W+'" y1="'+y+'" y2="'+y+'"/><text class="ax bx" x="'+(L-6)+'" y="'+(y+3)+'" text-anchor="end">'+(step*i)+'</text>'}
  const bw=(W-L)/12;
  CH.m.forEach((m,i)=>{const x=L+i*bw+bw/2;
   [[CH.p[i],'#f2a33a',-11],[CH.c[i],'#2e9d68',1]].forEach(a=>{const h=(H-T-B)*a[0]/top;
    s+='<rect x="'+(x+a[2])+'" y="'+(H-B-h)+'" width="10" height="'+h+'" rx="3" fill="'+a[1]+'"/>'});
-  s+='<text class="ax" x="'+x+'" y="'+(H-8)+'" text-anchor="middle">'+m+'</text>'});
+  s+='<text class="ax bx" x="'+x+'" y="'+(H-8)+'" text-anchor="middle">'+m+'</text>'});
  el.innerHTML=s})();
 (function(){const el=document.getElementById('donut');if(!el)return;
  const a=DN.college,b=DN.lhs,tot=a+b,R=62,C=2*Math.PI*R;
