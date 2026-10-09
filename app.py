@@ -14,7 +14,7 @@ app.permanent_session_lifetime = timedelta(days=14)
 app.config['MAX_CONTENT_LENGTH'] = 3 * 1024 * 1024      # profile photo upload limit (3 MB)
 
 # ========== CONFIG ==========
-LOGO_URL = "/static/JGE.jpg"          # put your logo at static/JGE.jpg
+LOGO_URL = "/static/jgetocopy.png"          # put your logo at static/JGE.jpg
 BACKGROUND_URL = "/static/Office.jpg" # login page background photo: static/Office.jpg
 BANNER_URL = "/static/bannerjge.png"  # rectangular photo on the home page (falls back to Office.jpg)
 ABOUT_BANNER_URL = "/static/Fronts.jpg" # rectangular photo on top of About Us (falls back to Banner.jpg, then Office.jpg)
@@ -1930,5 +1930,5 @@ def logout():
 if __name__ == '__main__':
     print("SLSU JGE TAGKAWAYAN — Registrar Appointment System")
     print(f"Admin login: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
-    print("Running at http://127.0.0.1:5000  (logo: static/JGE.jpg)")
+    print("Running at http://127.0.0.1:5000  (logo: static/jgetocopy.png)")
     app.run(debug=os.environ.get('FLASK_DEBUG') == '1', port=5000)
