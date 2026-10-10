@@ -14,7 +14,7 @@ app.permanent_session_lifetime = timedelta(days=14)
 app.config['MAX_CONTENT_LENGTH'] = 3 * 1024 * 1024      # profile photo upload limit (3 MB)
 
 # ========== CONFIG ==========
-LOGO_URL = "/static/jgetocopy.png"          # put your logo at static/JGE.jpg
+LOGO_URL = "/static/JGE_LOGO.png"          # put your logo at static/JGE.jpg
 BACKGROUND_URL = "/static/Office.jpg" # login page background photo: static/Office.jpg
 BANNER_URL = "/static/bannerjge.png"  # rectangular photo on the home page (falls back to Office.jpg)
 ABOUT_BANNER_URL = "/static/Fronts.jpg" # rectangular photo on top of About Us (falls back to Banner.jpg, then Office.jpg)
@@ -434,9 +434,9 @@ button,input,select,textarea{font-family:inherit}
 .bgblur{position:fixed;inset:-30px;z-index:-1;pointer-events:none;background-position:center;background-repeat:no-repeat;
  background-size:cover;filter:blur(8px);opacity:.22}
 [data-theme=dark] .bgblur{opacity:.07}
-.logo-circle{position:relative;border-radius:50%;background:var(--dark);display:flex;align-items:center;
- justify-content:center;overflow:hidden;color:#fff;font-weight:700;flex:none}
-.logo-circle img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.logo-circle{position:relative;border-radius:50%;background:transparent;display:flex;align-items:center;
+ justify-content:center;overflow:visible;color:transparent;font-weight:700;flex:none}
+.logo-circle img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
 label{display:block;margin-bottom:.4rem;font-weight:600;font-size:.84rem;color:var(--tx)}
 input,select,textarea{width:100%;padding:.72rem .9rem;border:1px solid var(--bd);background:var(--inp);color:var(--tx);border-radius:9px;font-size:.93rem;transition:border-color .15s,box-shadow .15s}
 textarea{resize:vertical}
@@ -461,7 +461,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--pri);box
  justify-content:space-between;flex-wrap:wrap;gap:.8rem 1.5rem;background:var(--card);position:sticky;top:0;z-index:100;
  box-shadow:0 1px 0 var(--bd),0 4px 14px rgba(0,36,15,.05)}
 .logo-group{display:flex;align-items:center;gap:.8rem;min-width:0}
-.logo-group .logo-circle{width:46px;height:46px;font-size:.7rem;border:2px solid var(--gold)}
+.logo-group .logo-circle{width:46px;height:46px;font-size:.7rem}
 .logo-text h1{font-size:.98rem;color:var(--acc);letter-spacing:.3px;font-weight:700}.logo-text p{font-size:.76rem;color:var(--mut)}
 .nav-menu{display:flex;gap:.25rem;list-style:none;flex-wrap:wrap}
 .nav-menu a{text-decoration:none;color:var(--mut);font-weight:500;padding:.55rem .95rem;border-radius:8px;font-size:.88rem;display:block;transition:.15s}
@@ -652,15 +652,13 @@ img,svg,canvas,video{max-width:100%}
   .filtbar select{width:100%;max-width:none;min-width:0}
   .act .when{display:none}
 }
-@media only screen and (max-width:480px){
-  .top-bar{font-size:.68rem;padding:.4rem .6rem}
-  .logo-text h1{font-size:.9rem}
-  .av-row{justify-content:center;text-align:center}
-  .pm-head{flex-direction:column;text-align:center}
-  .stp{gap:.7rem}.stp .n{width:30px;height:30px;font-size:.85rem}
-  .alert{padding:.8rem;gap:.6rem}
-  .reqbox,.rq-key{padding:.8rem}
-  .tiles{grid-template-columns:1fr 1fr}
+@media only screen and (max-width:768px){
+  .nav-menu{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;-webkit-overflow-scrolling:touch;
+    scrollbar-width:none;padding:2px 2px 6px}
+  .nav-menu::-webkit-scrollbar{display:none}
+  .nav-menu>li{flex:none}.nav-menu a,.mb{white-space:nowrap;border-radius:2rem;background:var(--soft);color:var(--acc)}
+  .nav-menu a.active,.mb.active{background:var(--pri);color:#fff}
+  .header-main nav{margin-top:0}
 }
 """
 
@@ -689,59 +687,98 @@ FLASH_JS = ("document.querySelectorAll('.msg').forEach(m=>{m.style.cursor='point
             "setTimeout(rm,{{ flash_ms }})});")
 
 # ========== LOGIN / REGISTER ==========
-# Full-height photo in its original colors, tinted with the #003d1f theme green.
+# Light frosted card with a gold top edge, over the tinted office photo.
 LOGIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#00240f">
 <title>SLSU JGE - Office of the Registrar</title>""" + FA + """
 <style>{{ css|safe }}
-html{min-height:100%;background:#003d1f}
-body{background:transparent;min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:1.5rem}
-body::before{content:"";position:fixed;inset:0;z-index:-2;background:url('{{ bg }}') center/cover no-repeat;
- }
-body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradient(rgba(0,61,31,.45),rgba(0,61,31,.75))}
-.lcard{background:rgba(255,255,255,.95);color:#222;border:1px solid rgba(255,255,255,.4);backdrop-filter:blur(10px);
- border-radius:18px;box-shadow:0 14px 50px rgba(0,0,0,.3);width:100%;max-width:460px;overflow:hidden;border-top:4px solid #c9a227}
-.lh{padding:2rem 2rem 1rem;text-align:center}
-.lh .logo-circle{width:96px;height:96px;margin:0 auto 1rem;font-size:1.1rem;background:#003d1f;border:3px solid #c9a227;box-shadow:0 2px 10px rgba(0,0,0,.25)}
-.lh h1{font-size:1.25rem;color:#003d1f}.lh p{font-size:.88rem;color:#666;margin-top:.4rem}
-.lb{padding:0 2rem 1.5rem}
-.lcard label{color:#333}
-.lcard input,.lcard select{background:#fff;border-color:#d5d9d6;color:#111}
-.lcard input:focus,.lcard select:focus{border-color:#003d1f;box-shadow:0 0 0 3px rgba(0,61,31,.25)}
-.lcard .btn{background:#003d1f;color:#fff}.lcard .btn:hover{background:#005a2d}
-.lcard .hint{color:#777}
-.lcard .msg,.lcard .msg.error,.lcard .msg.ok{background:#eefaf1;color:#1b5e20;border-color:#003d1f}
-.iw{position:relative}.iw input{padding-right:60px}
-.tpw{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:0;color:#777;cursor:pointer;font-size:.85rem}
-.tpw:hover{color:#000}
-.row{display:flex;justify-content:space-between;align-items:center;margin:.3rem 0 1.1rem;flex-wrap:wrap;gap:.5rem}
-.row label{display:flex;align-items:center;gap:.4rem;margin:0}.row input{width:auto}
-a.lk,.lkb{color:#003d1f;text-decoration:none;font-size:.88rem;background:none;border:0;cursor:pointer}
-a.lk:hover,.lkb:hover{text-decoration:underline;color:#005a2d}
-.center{text-align:center;margin-top:1.2rem;font-size:.9rem;color:#666}
-.copy{text-align:center;font-size:.75rem;color:#999;padding-bottom:1.5rem}
+html{min-height:100%;background:#00240f}
+body{background:transparent;min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;
+ padding:1.25rem 1rem calc(1.25rem + env(safe-area-inset-bottom))}
+body::before{content:"";position:fixed;inset:0;z-index:-2;background:url('{{ bg }}') center/cover no-repeat}
+body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradient(rgba(0,61,31,.45),rgba(0,36,15,.7))}
+
+/* ---- light frosted card with gold top edge ---- */
+.lcard{position:relative;width:100%;max-width:460px;padding:2rem 2rem 1.4rem;color:#1b2620;border-radius:22px;
+ background:rgba(255,255,255,.93);
+ -webkit-backdrop-filter:blur(14px) saturate(130%);backdrop-filter:blur(14px) saturate(130%);
+ border-top:5px solid #c9a227;
+ box-shadow:0 18px 50px rgba(0,0,0,.35),0 2px 6px rgba(0,0,0,.15)}
+.lh{text-align:center}
+.lh .logo-circle{width:96px;height:96px;margin:0 auto 1rem;background:transparent;border:0;overflow:visible;
+ filter:drop-shadow(0 4px 8px rgba(0,0,0,.3))}
+.lh .logo-circle img{object-fit:contain}
+.lh h1{font-size:1.3rem;font-weight:700;color:#003d1f;line-height:1.25}
+.lh p{font-size:.88rem;color:#5d6a62;margin-top:.5rem}
+.lform{margin-top:1.6rem}
+
+/* ---- form controls ---- */
+.lcard label{color:#1b2620;font-size:.86rem}
+.lcard input,.lcard select{background:#fff;border:1px solid #dde3df;color:#1b2620;border-radius:12px;
+ padding:.85rem 1rem;font-size:16px}
+.lcard input::placeholder{color:#8a948e}
+.lcard input:focus,.lcard select:focus{border-color:#003d1f;box-shadow:0 0 0 3px rgba(0,61,31,.18)}
+.lcard .btn{background:#003d1f;color:#fff;border-radius:12px;padding:.9rem 1.2rem;font-size:1rem;box-shadow:none}
+.lcard .btn:hover{background:#005a2d;box-shadow:0 4px 12px rgba(0,61,31,.3)}
+.lcard .hint{color:#5d6a62}
+.lcard .msg{background:#eefaf1;color:#14532d;border-color:#2e9d68}
+.lcard .msg.error{background:#fff2f2;color:#a30000;border-color:#e53935}
+.iw{position:relative}.iw input{padding-right:4.2rem}
+.tpw{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:#5d6a62;cursor:pointer;
+ font-size:.84rem;font-weight:500;height:40px;padding:0 .7rem}
+.tpw:hover{color:#003d1f}
+.row{display:flex;justify-content:space-between;align-items:center;margin:.2rem 0 1.2rem;flex-wrap:wrap;gap:.5rem}
+.row label{display:flex;align-items:center;gap:.45rem;margin:0;font-weight:600}.row input{width:auto}
+.lkb,a.lk{color:#003d1f;text-decoration:none;font-size:.88rem;background:none;border:0;cursor:pointer;font-weight:500}
+.lkb:hover,a.lk:hover{text-decoration:underline}
+.agree{display:flex;gap:.6rem;align-items:flex-start;font-weight:400;font-size:.84rem;line-height:1.45;margin:.2rem 0 1.1rem;cursor:pointer}
+.agree input{width:auto;margin-top:.2rem;flex:none}
 .lcard .g3{grid-template-columns:1fr 1fr 1fr;gap:0 .6rem}
-@media(max-width:480px){body{padding:1rem}.lh,.lb{padding-left:1.4rem;padding-right:1.4rem}.lcard .g3,.lcard .g2{grid-template-columns:1fr}}
+
+/* ---- help section (register page) ---- */
+.hp{margin-top:1.3rem;border:1px solid #dde3df;border-radius:14px;background:#f6faf7;padding:0}
+.hp summary{cursor:pointer;list-style:none;padding:.85rem 1rem;font-weight:600;font-size:.9rem;display:flex;align-items:center;gap:.6rem;color:#003d1f}
+.hp summary::-webkit-details-marker{display:none}
+.hp summary::after{content:"\\25BE";margin-left:auto;transition:.2s}
+.hp[open] summary::after{transform:rotate(180deg)}
+.hp ol{list-style:none;counter-reset:s;padding:.2rem 1rem 1rem}
+.hp li{counter-increment:s;display:flex;gap:.8rem;padding:.55rem 0;font-size:.86rem;line-height:1.45;color:#1b2620}
+.hp li::before{content:counter(s);flex:none;width:26px;height:26px;border-radius:50%;background:#003d1f;color:#fff;
+ font-weight:700;font-size:.78rem;display:flex;align-items:center;justify-content:center;margin-top:.05rem}
+.hp li b{color:#003d1f}
+.hp .tip{margin:0 1rem 1rem;padding:.65rem .8rem;border-radius:10px;background:#e3f0e8;font-size:.8rem;color:#1b2620}
+
+.center{text-align:center;margin-top:1.2rem;font-size:.9rem;color:#5d6a62}
+.center a{color:#003d1f;text-decoration:none;font-weight:600}.center a:hover{text-decoration:underline}
+.copy{text-align:center;font-size:.76rem;color:#8a948e;margin-top:1.3rem;line-height:1.6}
+.copy .lkb{font-size:.76rem;color:#003d1f;font-weight:700}
+@media(max-width:480px){
+ body{padding:.8rem .7rem calc(.8rem + env(safe-area-inset-bottom));align-items:flex-start}
+ .lcard{padding:1.5rem 1.2rem 1.1rem;border-radius:20px;margin:auto 0}
+ .lh .logo-circle{width:84px;height:84px}.lh h1{font-size:1.15rem}
+ .lcard .g3,.lcard .g2{grid-template-columns:1fr}
+}
 </style></head><body>
 <div class="lcard">
- <div class="lh">""" + LOGO_HTML + """<h1>SLSU JGE - Office of the Registrar</h1><p>JGE Tagkawayan Campus · Registrar Appointment</p></div>
- <div class="lb">
- {% for cat, m in get_flashed_messages(with_categories=true) %}<div class="msg {{ cat }}">{{ m }}</div>{% endfor %}
+ <div class="lh">""" + LOGO_HTML + """<h1>SLSU JGE - Office of the Registrar</h1><p>JGE Tagkawayan Campus · Registrar Appointment System</p></div>
+ {% for cat, m in get_flashed_messages(with_categories=true) %}<div class="msg {{ cat }}" style="margin-top:1rem">{{ m }}</div>{% endfor %}
+
  {% if page == 'login' %}
-  <form method="POST" action="/login">
-   <div class="form-group"><label>Gmail or Student ID</label>
+  <form method="POST" action="/login" class="lform">
+   <div class="form-group"><label>Email or Student ID</label>
     <input type="text" name="email" required autocomplete="username" placeholder="yourname@gmail.com or 2023-00123"></div>
    <div class="form-group"><label>Password</label><div class="iw">
     <input type="password" name="password" id="lp" required autocomplete="current-password" placeholder="Enter password">
-    <button type="button" class="tpw" onclick="tp('lp',this)">Show</button></div></div>
+    <button type="button" class="tpw" onclick="tp('lp',this)" aria-label="Show password">Show</button></div></div>
    <div class="row"><label><input type="checkbox" name="remember"> Remember me</label>
     <button type="button" class="lkb" onclick="document.getElementById('fp').style.display='block'">Forgot password?</button></div>
-   <div id="fp" class="msg ok" style="display:none">To reset your password, please visit the Registrar's Office or contact the system administrator.</div>
+   <div id="fp" class="msg" style="display:none">To reset your password, please visit the Registrar's Office or contact the system administrator.</div>
    <button class="btn btn-full">Log In</button></form>
-  <div class="center">No account yet? <a class="lk" href="/register">Register here</a></div>
+  <p class="center">No account yet? <a href="/register">Register here</a></p>
+
  {% elif page == 'register' %}
-  <h2 style="text-align:center;margin-bottom:1.2rem;font-size:1.2rem;color:#003d1f">Create Your Account</h2>
-  <form method="POST" action="/register">
+  <form method="POST" action="/register" class="lform">
    <div class="g3">
     <div class="form-group"><label>Last Name *</label><input name="last_name" required maxlength="60" value="{{ f.last_name }}"></div>
     <div class="form-group"><label>First Name *</label><input name="first_name" required maxlength="60" value="{{ f.first_name }}"></div>
@@ -765,32 +802,69 @@ a.lk:hover,.lkb:hover{text-decoration:underline;color:#005a2d}
     <p class="hint">College students must be at least 16 years old; Laboratory High School students at least 11.</p></div>
    <div class="form-group"><label>Gmail Address *</label><input type="email" name="email" required placeholder="yourname@gmail.com" value="{{ f.email }}"></div>
    <div class="form-group"><label>Password *</label><div class="iw"><input type="password" name="password" id="p1" required>
-    <button type="button" class="tpw" onclick="tp('p1',this)">Show</button></div>
-    <p class="hint">8+ chars · 1 uppercase · 1 number · 1 symbol (!@#$%^&*)</p></div>
+    <button type="button" class="tpw" onclick="tp('p1',this)" aria-label="Show password">Show</button></div>
+    <p class="hint">8+ characters · 1 uppercase · 1 number · 1 symbol (!@#$%^&*)</p></div>
    <div class="form-group"><label>Confirm Password *</label><div class="iw"><input type="password" name="confirm_pw" id="p2" required>
-    <button type="button" class="tpw" onclick="tp('p2',this)">Show</button></div></div>
+    <button type="button" class="tpw" onclick="tp('p2',this)" aria-label="Show password">Show</button></div></div>
    <button class="btn btn-full">Submit for Activation</button></form>
-  <div class="center">Already registered? <a class="lk" href="/login">← Sign In</a></div>
+  <p class="center">Already have an account? <a href="/login">Log In</a></p>
+
+  <details class="hp" open><summary><i class="fas fa-circle-question"></i> Need help? How to register an account</summary>
+   <ol>
+    <li><span>Fill in the form on this page.</span></li>
+    <li><span>Choose <b>College Student</b> or <b>Laboratory High School Student</b>, then type your last, first and middle name (write <b>N/A</b> if you have none) and your <b>Student ID</b>.</span></li>
+    <li><span>Select your <b>program and year level</b> (or <b>grade level and section</b> for Laboratory High School), your gender and birthday.</span></li>
+    <li><span>Enter a valid <b>Gmail address</b> and a strong password: 8+ characters with an uppercase letter, a number and a symbol.</span></li>
+    <li><span>Press <b>Submit for Activation</b>.</span></li>
+    <li><span><b>Wait for approval.</b> Keep the page open: it tells you when the administrator approves your account.</span></li>
+    <li><span>Go to <b>Log In</b> and use your Email or Student ID and password. Then open <b>Book Appointment</b> to request your document.</span></li></ol>
+   <p class="tip"><i class="fas fa-lightbulb"></i> Use your real details exactly as in your school records. Wrong information can delay approval. Forgot your password? Visit the Registrar's Office.</p></details>
+
  {% else %}
-  <div style="text-align:center;padding:1rem 0"><i class="fas fa-clock" id="pic" style="font-size:3rem;color:#003d1f"></i>
-   <h2 id="ptt" style="margin:1rem 0;color:#003d1f">Awaiting Activation</h2></div>
-  <p id="ptx" style="text-align:center;line-height:1.6;color:#555">Your account has been submitted. Please wait for the administrator to approve it. Keep this page open and we will notify you here as soon as it is approved.</p>
-  <div class="center" id="pgo"><a class="lk" href="/login">← Back to Sign In</a></div>
+  <div style="text-align:center;padding:1.4rem 0 .6rem"><i class="fas fa-clock" id="pic" style="font-size:3rem;color:#003d1f"></i>
+   <h2 id="ptt" style="margin:1rem 0;font-size:1.25rem;color:#003d1f">Awaiting Activation</h2></div>
+  <p id="ptx" style="text-align:center;line-height:1.6;color:#1b2620">Your account has been submitted. Please wait for the administrator to approve it. Keep this page open and we will notify you here as soon as it is approved.</p>
+  <div class="center" id="pgo"><a class="lk" href="/login">← Back to Log In</a></div>
  {% endif %}
- </div>
- <p class="copy">© Southern Luzon State University — JGE Tagkawayan Campus</p>
+
+ <p class="copy">© Southern Luzon State University — JGE Tagkawayan Campus
+  {% if page == 'login' %}<br><button type="button" class="lkb" onclick="openTerms()">Terms and Conditions</button>{% endif %}</p>
 </div>
-<script>function tp(id,b){const i=document.getElementById(id),s=i.type==='password';i.type=s?'text':'password';b.textContent=s?'Hide':'Show'}
+
+<div class="modal" id="terms"><div class="mbox wide"><button type="button" class="x" onclick="closeTerms()" aria-label="Close">&times;</button>
+ <h3 class="ct"><i class="fas fa-file-contract"></i> Terms and Conditions</h3>
+ <div class="prose"><p>By creating an account and using the SLSU JGE Tagkawayan Registrar Appointment System you agree to the following:</p>
+  <ul>
+   <li><strong>Purpose.</strong> The system is for requesting documents from the Office of the Registrar and scheduling a visit. A booking is a request for a schedule, not a guarantee that your document is ready.</li>
+   <li><strong>Accurate information.</strong> Give true and complete details. False information may lead to rejection or removal of your account.</li>
+   <li><strong>Your account.</strong> Registration must be approved by the administrator. Keep your password private; you are responsible for all activity under your account.</li>
+   <li><strong>Your own records.</strong> Request only your own records, or records you are authorized to request.</li>
+   <li><strong>Attendance.</strong> Come on your scheduled date and time. An appointment you do not attend is removed after that day and counted as failed. After 3 failed appointments you cannot book for 3 months.</li>
+   <li><strong>Requirements and fees.</strong> Bring the required documents and pay the processing fee at the SLSU JGE Campus Cashier. Processing time and fees follow Registrar policy.</li>
+   <li><strong>Data privacy.</strong> Your information is handled under the Data Privacy Act of 2012 (RA 10173), used only to verify you and process your requests, and seen only by authorized registrar staff and administrators.</li>
+   <li><strong>Changes.</strong> The campus may update these terms and may suspend accounts that misuse the system.</li></ul></div>
+ <div class="mbtn"><button type="button" class="btn btn-sm" onclick="closeTerms()">I understand</button></div></div></div>
+
+<script>
+function tp(id,b){const i=document.getElementById(id),s=i.type==='password';i.type=s?'text':'password';
+ b.textContent=s?'Hide':'Show';b.setAttribute('aria-label',s?'Hide password':'Show password')}
 function lv(){const l=document.getElementById('level');if(!l)return;const c=l.value!=='lhs';
  [['blkCollege',c],['blkLhs',!c]].forEach(a=>{const b=document.getElementById(a[0]);b.classList.toggle('hid',!a[1]);
   b.querySelectorAll('select,input').forEach(x=>{x.disabled=!a[1];x.required=a[1]})})}
-lv();</script>
+lv();
+const tm=document.getElementById('terms');
+function openTerms(){tm.classList.add('open')}function closeTerms(){tm.classList.remove('open')}
+tm.addEventListener('click',e=>{if(e.target===tm)closeTerms()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeTerms()});
+document.querySelectorAll('.msg').forEach(m=>{if(m.id==='fp')return;m.style.cursor='pointer';
+ setTimeout(()=>{m.style.opacity=0;setTimeout(()=>m.remove(),350)},{{ flash_ms }}+2500);m.addEventListener('click',()=>m.remove())});
+</script>
 {% if page == 'pending' %}<script>
 (function(){const ic=document.getElementById('pic'),tt=document.getElementById('ptt'),tx=document.getElementById('ptx'),go=document.getElementById('pgo');
  function show(ok){ic.className=ok?'fas fa-check-circle':'fas fa-times-circle';
   tt.textContent=ok?'Account Approved!':'Registration Not Approved';
-  tx.textContent=ok?'Good news! The administrator has approved your account. You can now sign in and book your appointments.':'Sorry, your registration was not approved. Please visit the Registrars Office, or register again with the correct details.';
-  go.innerHTML=ok?'<a class="btn btn-full" href="/login">Sign In Now</a>':'<a class="lk" href="/register">Register again</a>'}
+  tx.textContent=ok?'Good news! The administrator has approved your account. You can now log in and book your appointments.':'Sorry, your registration was not approved. Please visit the Registrars Office, or register again with the correct details.';
+  go.innerHTML=ok?'<a class="btn btn-full" style="color:#fff" href="/login">Log In Now</a>':'<a class="lk" href="/register">Register again</a>'}
  function chk(){fetch('/register/status',{cache:'no-store'}).then(r=>r.json()).then(d=>{
   if(d.status==='approved'){show(true);clearInterval(t)}else if(d.status==='rejected'){show(false);clearInterval(t)}}).catch(()=>{})}
  const t=setInterval(chk,4000);chk()})();
@@ -1088,7 +1162,7 @@ ADMIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 .adm{display:flex;min-height:100vh}
 .sb{width:248px;flex:none;background:var(--card);border-right:1px solid var(--bd);position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:1rem .8rem;overflow-y:auto;z-index:300}
 .sb-brand{display:flex;align-items:center;gap:.7rem;padding:.3rem .5rem 1.2rem}
-.sb-brand .logo-circle{width:42px;height:42px;font-size:.65rem;border:2px solid var(--gold)}
+.sb-brand .logo-circle{width:42px;height:42px;font-size:.65rem}
 .sb-brand b{display:block;color:var(--acc);font-size:.95rem;line-height:1.15}.sb-brand small{color:var(--mut);font-size:.72rem}
 .si{display:flex;align-items:center;gap:.75rem;padding:.7rem .9rem;border-radius:10px;color:var(--mut);font-weight:500;font-size:.9rem;cursor:pointer;margin-bottom:.2rem;text-decoration:none;position:relative}
 .si i{width:1.2rem;text-align:center}
