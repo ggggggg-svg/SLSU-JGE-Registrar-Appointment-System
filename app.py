@@ -702,6 +702,58 @@ input[readonly]{cursor:not-allowed}
   summary{padding-top:.4rem;padding-bottom:.4rem}
   .x{width:44px;height:44px;right:.3rem;top:.3rem}
 }
+
+/* ========== ALL DEVICES: phones, tablets, laptops, large screens ========== */
+body.sticky,.adm{min-height:100vh;min-height:100dvh}
+.tw{-webkit-overflow-scrolling:touch}
+iframe{max-width:100%}
+p,li,dd,.msg,.alert{overflow-wrap:anywhere}
+.g2,.g3{align-items:start}
+
+/* Date fields (Birthday, Preferred Date): same height, left-aligned text and look on every browser */
+input[type=date]{-webkit-appearance:none;appearance:none;display:block;width:100%;line-height:1.3;text-align:left;
+  font-family:inherit;color:var(--tx);background-color:var(--inp);min-width:0}
+input[type=date]::-webkit-date-and-time-value{text-align:left;min-height:1.3em;margin:0}
+input[type=date]::-webkit-datetime-edit{padding:0}
+input[type=date]::-webkit-calendar-picker-indicator{cursor:pointer;opacity:.7}
+[data-theme=dark] input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1)}
+input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=hidden]),select{min-height:2.95rem}
+.pf .form-group{min-width:0}
+
+@media (min-width:769px) and (max-width:1024px){
+  .header-main{padding:.8rem 1.25rem}
+  .header-main nav{order:3;width:100%}
+  .nav-menu{justify-content:center}
+  .page-container{padding:1.5rem 1.25rem}
+  .banner{aspect-ratio:2.4/1}
+  .grid{grid-template-columns:repeat(3,1fr)}
+  .card{padding:1.3rem}
+  .top-bar{padding:.45rem 1.25rem}
+}
+@media (max-width:768px){
+  .header-main{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+  .page-container{padding-left:max(15px,env(safe-area-inset-left));padding-right:max(15px,env(safe-area-inset-right))}
+}
+@media (max-width:480px){
+  .top-bar{font-size:.68rem;line-height:1.35}
+  .logo-text h1{font-size:.9rem}
+  h2.t{font-size:1.15rem}
+  .stp{gap:.7rem}.stp .n{width:32px;height:32px}
+  .pm-head{flex-direction:column;align-items:flex-start}
+  .av-row{justify-content:center;text-align:center}
+  .mbtn{flex-wrap:wrap}.mbtn .btn{flex:1}
+  .tiles{grid-template-columns:1fr 1fr}
+}
+@media (max-width:360px){
+  .tiles{grid-template-columns:1fr}
+  .nav-menu a,.mb{padding:8px 10px;font-size:13px}
+}
+@media (max-height:500px) and (orientation:landscape){
+  .modal{align-items:flex-start;overflow:auto}
+  .mbox,.mbox.wide{max-height:none}
+}
+@media (min-width:1600px){.page-container{max-width:1480px}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
 """
 
 HEAD_LINKS = ('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">'
@@ -733,6 +785,11 @@ TOUCH_JS = ("document.addEventListener('touchstart',e=>{"
             "if(b)b.classList.add('tap')},{passive:true});"
             "['touchend','touchcancel'].forEach(n=>document.addEventListener(n,()=>{"
             "document.querySelectorAll('.tap').forEach(x=>x.classList.remove('tap'))},{passive:true}));")
+
+# Birthday fields cannot be set in the future (uses the device's local date).
+DATE_JS = ("(function(){const d=new Date(),p=n=>String(n).padStart(2,'0'),"
+           "t=d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());"
+           "document.querySelectorAll('input[name=\"birthday\"]').forEach(i=>{i.max=t})})();")
 
 # ========== LOGIN / REGISTER ==========
 # Light frosted card with a gold top edge, over the tinted office photo.
@@ -822,7 +879,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
     <input type="password" name="password" id="lp" required autocomplete="current-password" placeholder="Enter password">
     <button type="button" class="tpw" onclick="tp('lp',this)" aria-label="Show password">Show</button></div></div>
    <div class="row"><label><input type="checkbox" name="remember"> Remember me</label>
-    <button type="button" class="lkb" onclick="document.getElementById('fp').style.display='block'">Forgot password?</button></div>
+    <button type="button" class="lkb" onclick="var f=document.getElementById('fp');f.style.display=f.style.display==='block'?'none':'block'">Forgot password?</button></div>
    <div id="fp" class="msg" style="display:none">To reset your password, please visit the Registrar's Office or contact the system administrator.</div>
    <button class="btn btn-full">Log In</button></form>
   <p class="center">No account yet? <a href="/register">Register here</a></p>
@@ -896,7 +953,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
  <div class="mbtn"><button type="button" class="btn btn-sm" onclick="closeTerms()">I understand</button></div></div></div>
 
 <script>
-""" + TOUCH_JS + """
+""" + TOUCH_JS + DATE_JS + """
 function tp(id,b){const i=document.getElementById(id),s=i.type==='password';i.type=s?'text':'password';
  b.textContent=s?'Hide':'Show';b.setAttribute('aria-label',s?'Hide password':'Show password')}
 function lv(){const l=document.getElementById('level');if(!l)return;const c=l.value!=='lhs';
@@ -924,7 +981,9 @@ document.querySelectorAll('.msg').forEach(m=>{if(m.id==='fp')return;m.style.curs
 
 # ========== STUDENT PORTAL ==========
 USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#003d1f">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Student Portal — SLSU JGE Tagkawayan</title>""" + THEME_INIT + FA + """
 <script>function fb(i){const l=(i.dataset.fb||'').split('|').filter(Boolean),n=l.shift();if(n){i.dataset.fb=l.join('|');i.src=n}else{i.remove()}}</script>
 <style>{{ css|safe }}</style></head><body class="sticky">
@@ -1039,19 +1098,18 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
     <div class="form-group"><label>Last Name *</label><input name="last_name" required maxlength="60" value="{{ nm.ln }}"></div>
     <div class="form-group"><label>First Name *</label><input name="first_name" required maxlength="60" value="{{ nm.fn }}"></div>
     <div class="form-group"><label>Middle Name *</label><input name="middle_name" required maxlength="60" value="{{ nm.mn }}" placeholder="N/A if none"></div></div>
-   <div class="g2"><div class="form-group"><label>Email</label><input value="{{ session.email }}" readonly></div>
+   <div class="g2 pf"><div class="form-group"><label>Email</label><input value="{{ session.email }}" readonly></div>
     <div class="form-group"><label>Student ID</label><input value="{{ session.studentid }}" readonly></div>
-    <div class="form-group"><label>Birthday *</label><input type="date" name="birthday" required value="{{ me.get('birthday','') }}"></div>
+    <div class="form-group"><label>Birthday *</label><input type="date" name="birthday" class="bday" required autocomplete="bday" value="{{ me.get('birthday','') }}"></div>
+    <div class="form-group"><label>Contact Number</label><input type="tel" name="contact" inputmode="tel" placeholder="09XX-XXX-XXXX" value="{{ me.get('contact','') }}"></div>
     {% if is_lhs %}
     <div class="form-group"><label>Grade Level</label><select name="year_level"><option value="">-- Not set --</option>
      {% for g in grades %}<option {{ 'selected' if g==me.get('year_level') }}>{{ g }}</option>{% endfor %}</select></div>
     <div class="form-group"><label>Section *</label><input name="section" required maxlength="30" value="{{ me.get('section','') }}"></div>
-    <div class="form-group"><label>Contact Number</label><input type="tel" name="contact" placeholder="09XX-XXX-XXXX" value="{{ me.get('contact','') }}"></div>
-    <div class="form-group"><label>Student Type</label><input value="Laboratory High School" readonly></div></div>
+    <div class="form-group" style="grid-column:1/-1"><label>Student Type</label><input value="Laboratory High School" readonly></div></div>
     {% else %}
     <div class="form-group"><label>Year Level</label><select name="year_level"><option value="">-- Not set --</option>
      {% for y in years %}<option {{ 'selected' if y==me.get('year_level') }}>{{ y }}</option>{% endfor %}</select></div>
-    <div class="form-group"><label>Contact Number</label><input type="tel" name="contact" placeholder="09XX-XXX-XXXX" value="{{ me.get('contact','') }}"></div>
     <div class="form-group"><label>Default Course / Program</label><select name="course"><option value="">-- Not set --</option>
      {% for c in courses %}<option {{ 'selected' if c==me.get('course') }}>{{ c }}</option>{% endfor %}</select></div></div>
     {% endif %}
@@ -1137,7 +1195,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
  <div class="mbtn"><button type="button" class="btn btn-sm btn-ghost" id="cropCancel">Cancel</button><button type="button" class="btn btn-sm" id="cropOk">Use photo</button></div></div></div>
 """ + FOOTER + """
 <script>
-""" + FLASH_JS + THEME_JS + TOUCH_JS + """
+""" + FLASH_JS + THEME_JS + TOUCH_JS + DATE_JS + """
 const links=document.querySelectorAll('.nav-menu a[href^="#"]'),secs=document.querySelectorAll('.section'),mb=document.getElementById('moreBtn'),dd=document.getElementById('dd');
 function sw(id){if(!document.getElementById(id))id='home';
  links.forEach(l=>l.classList.toggle('active',l.getAttribute('href')==='#'+id));
@@ -1148,6 +1206,7 @@ function sw(id){if(!document.getElementById(id))id='home';
 links.forEach(l=>l.addEventListener('click',e=>{e.preventDefault();sw(l.getAttribute('href').slice(1))}));
 mb.addEventListener('click',e=>{e.stopPropagation();dd.classList.toggle('open')});
 document.addEventListener('click',()=>dd.classList.remove('open'));
+document.addEventListener('touchstart',e=>{if(!e.target.closest('.more'))dd.classList.remove('open')},{passive:true});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')dd.classList.remove('open')});
 sw(location.hash.slice(1)||'home');
 
@@ -1158,6 +1217,7 @@ const avIn=document.getElementById('avIn'),avPick=document.getElementById('avPic
 let im=null,sc=1,base=1,ox=0,oy=0,drag=null;
 document.getElementById('penBtn').addEventListener('click',e=>{e.stopPropagation();pop.classList.toggle('open')});
 document.addEventListener('click',e=>{if(!pop.contains(e.target))pop.classList.remove('open')});
+document.addEventListener('touchstart',e=>{if(!e.target.closest('.avwrap'))pop.classList.remove('open')},{passive:true});
 document.getElementById('popChoose').addEventListener('click',()=>{pop.classList.remove('open');avPick.click()});
 document.getElementById('popRemove').addEventListener('click',()=>{pop.classList.remove('open');
  rmAv.checked=true;avIn.value='';avPrev.classList.add('hid');avPh.classList.remove('hid')});
@@ -1182,8 +1242,9 @@ document.getElementById('cropOk').addEventListener('click',()=>{
   crop.classList.remove('open')},'image/jpeg',.9)});
 
 const dIn=document.querySelector('input[name="sched_date"]');
-const tmr=new Date();tmr.setDate(tmr.getDate()+1);dIn.min=tmr.toISOString().split('T')[0];
-dIn.addEventListener('input',()=>{const g=new Date(dIn.value+'T00:00').getDay();dIn.setCustomValidity(g===0||g===6?'The office is closed on weekends.':'');dIn.reportValidity()});
+if(dIn){const tmw=new Date();tmw.setDate(tmw.getDate()+1);const p2=n=>String(n).padStart(2,'0');
+ dIn.min=tmw.getFullYear()+'-'+p2(tmw.getMonth()+1)+'-'+p2(tmw.getDate());
+ dIn.addEventListener('input',()=>{const g=new Date(dIn.value+'T00:00').getDay();dIn.setCustomValidity(g===0||g===6?'The office is closed on weekends.':'');dIn.reportValidity()})}
 
 /* ---- requirements reminder when a document is chosen ---- */
 const REQS={{ reqs|tojson }},DREQ={{ doc_reqs|tojson }},docSel=document.querySelector('select[name="document"]');
@@ -1193,7 +1254,7 @@ function reqLi(it){const li=document.createElement('li');
  else{const t=document.createElement('div');t.className='rq-t';t.textContent=it.title;li.appendChild(t);
   const u=document.createElement('ul');(it.sub||[]).forEach(x=>u.appendChild(reqLi(x)));li.appendChild(u)}
  return li}
-docSel.addEventListener('change',()=>{const box=document.getElementById('reqList'),d=docSel.value,t=document.getElementById('reqTitle');box.innerHTML='';
+if(docSel)docSel.addEventListener('change',()=>{const box=document.getElementById('reqList'),d=docSel.value,t=document.getElementById('reqTitle');box.innerHTML='';
  if(!d){t.textContent='Requirements checklist';box.innerHTML='<p class="hint">Select a document above to see what you need to bring.</p>';return}
  t.textContent='Requirements for: '+d;
  const key=DREQ[d]||[];
@@ -1207,7 +1268,9 @@ docSel.addEventListener('change',()=>{const box=document.getElementById('reqList
 
 # ========== ADMIN ==========
 ADMIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#003d1f">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Admin Dashboard — SLSU JGE Tagkawayan</title>""" + THEME_INIT + FA + """
 <style>{{ css|safe }}
 .adm{display:flex;min-height:100vh}
@@ -1316,13 +1379,13 @@ form.in{display:inline}
 <aside class="sb" id="sb">
  <div class="sb-brand">""" + LOGO_HTML + """<div><b>SLSU JGE</b><small>Registrar Admin</small></div></div>
  <nav>
-  <a class="si active" data-tab="overview"><i class="fas fa-house"></i> Dashboard</a>
-  <a class="si" data-tab="all-appointments"><i class="fas fa-calendar-check"></i> Appointments <span class="bd2">{{ all_count }}</span></a>
-  <a class="si" data-tab="archive"><i class="fas fa-box-archive"></i> Archive <span class="bd2">{{ archive_count }}</span></a>
-  <a class="si" data-tab="missed"><i class="fas fa-user-xmark"></i> Missed <span class="bd2">{{ missed_count }}</span></a>
-  <a class="si" data-tab="accounts"><i class="fas fa-user-clock"></i> Pending Accounts <span class="bd2">{{ total_pending }}</span></a>
-  <a class="si" data-tab="users-list"><i class="fas fa-user-graduate"></i> Students <span class="bd2">{{ total_approved }}</span></a>
-  <a class="si" data-tab="feedback-list"><i class="fas fa-comments"></i> Feedback <span class="bd2">{{ feedback|length }}</span></a>
+  <a class="si active" data-tab="overview" href="#overview"><i class="fas fa-house"></i> Dashboard</a>
+  <a class="si" data-tab="all-appointments" href="#all-appointments"><i class="fas fa-calendar-check"></i> Appointments <span class="bd2">{{ all_count }}</span></a>
+  <a class="si" data-tab="archive" href="#archive"><i class="fas fa-box-archive"></i> Archive <span class="bd2">{{ archive_count }}</span></a>
+  <a class="si" data-tab="missed" href="#missed"><i class="fas fa-user-xmark"></i> Missed <span class="bd2">{{ missed_count }}</span></a>
+  <a class="si" data-tab="accounts" href="#accounts"><i class="fas fa-user-clock"></i> Pending Accounts <span class="bd2">{{ total_pending }}</span></a>
+  <a class="si" data-tab="users-list" href="#users-list"><i class="fas fa-user-graduate"></i> Students <span class="bd2">{{ total_approved }}</span></a>
+  <a class="si" data-tab="feedback-list" href="#feedback-list"><i class="fas fa-comments"></i> Feedback <span class="bd2">{{ feedback|length }}</span></a>
  </nav>
  <div class="sb-foot"><a href="/logout" class="si" style="color:#c62828"><i class="fas fa-right-from-bracket"></i> Sign Out</a></div>
 </aside>
@@ -1430,11 +1493,12 @@ form.in{display:inline}
   <div class="mbtn" style="justify-content:flex-end"><button type="button" class="btn btn-sm btn-ghost" id="pmCancel">Cancel</button><button class="btn btn-sm">Save changes</button></div></form>
 </div></div>
 <script>
-""" + FLASH_JS + THEME_JS + TOUCH_JS + """
+""" + FLASH_JS + THEME_JS + TOUCH_JS + DATE_JS + """
 const tabs=document.querySelectorAll('.si[data-tab]'),cs=document.querySelectorAll('.tab-content');
 function go(id){if(!document.getElementById(id))id='overview';tabs.forEach(t=>t.classList.toggle('active',t.dataset.tab===id));
  cs.forEach(c=>c.classList.toggle('active',c.id===id));history.replaceState(null,'','#'+id);document.body.classList.remove('sbo');window.scrollTo(0,0)}
-tabs.forEach(t=>t.addEventListener('click',()=>go(t.dataset.tab)));go(location.hash.slice(1)||'overview');
+tabs.forEach(t=>t.addEventListener('click',e=>{e.preventDefault();go(t.dataset.tab)}));
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.body.classList.remove('sbo')});go(location.hash.slice(1)||'overview');
 document.getElementById('hamb').addEventListener('click',()=>document.body.classList.add('sbo'));
 document.getElementById('sbov').addEventListener('click',()=>document.body.classList.remove('sbo'));
 
