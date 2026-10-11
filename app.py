@@ -660,6 +660,48 @@ img,svg,canvas,video{max-width:100%}
   .nav-menu a.active,.mb.active{background:var(--pri);color:#fff}
   .header-main nav{margin-top:0}
 }
+
+/* ========== TOUCH: every button responds like the "More" menu (phones & tablets) ========== */
+a,button,summary,label,select,input[type=checkbox],input[type=radio],
+.btn,.si,.mb,.theme-btn,.pen,.tpw,.lkb,.plink,.hamb,.stat,.x,.pop button,.nav-menu a,.dd a,.gres a{
+  touch-action:manipulation;                      /* no double-tap-zoom delay: the tap fires instantly */
+  -webkit-tap-highlight-color:rgba(0,61,31,.18);
+  cursor:pointer;
+}
+button,.btn,.si,.mb,.theme-btn,.pen,summary{-webkit-user-select:none;user-select:none}
+input[readonly]{cursor:not-allowed}
+
+/* Press feedback (works on touch, unlike :hover) */
+.btn:active,.mb:active,.theme-btn:active,.pen:active,.si:active,.nav-menu a:active,
+.pop button:active,.dd a:active,.stat:active,.hamb:active,.tap{transform:scale(.97);filter:brightness(.92)}
+
+/* Touch screens have no real hover: stop buttons staying "stuck" in hover style after a tap */
+@media (hover:none){
+  .btn:hover{transform:none;box-shadow:none;background:var(--pri)}
+  .btn-danger:hover{background:#c62828;box-shadow:none}
+  .btn-ghost:hover{background:transparent}
+  a.stat:hover{transform:none;border-color:var(--bd)}
+  .theme-btn:hover{background:var(--card)}
+  .pop button:hover{background:none}
+  .si:not(.active):hover{background:transparent;color:var(--mut)}
+  .nav-menu a:not(.active):hover,.mb:not(.active):hover{background:transparent;color:var(--mut)}
+  .nav-menu a.active:hover,.mb.active:hover,.si.active:hover{background:var(--soft);color:var(--acc)}
+}
+@media (hover:none) and (max-width:768px){
+  .nav-menu a:not(.active):hover,.mb:not(.active):hover{background:var(--soft);color:var(--acc)}
+  .nav-menu a.active:hover,.mb.active:hover{background:var(--pri);color:#fff}
+}
+
+/* Big enough tap targets on phones and tablets */
+@media (max-width:1024px){
+  .btn,.btn-sm,.mb,.theme-btn,.pen,.tpw,.hamb,.si,.nav-menu a,.dd a,.pop button{min-height:44px}
+  .pen{min-width:44px;min-height:44px;width:44px;height:44px}
+  .theme-btn,.hamb{min-width:44px}
+  .btn-sm{padding:.6rem 1rem}
+  .tpw{min-width:56px}
+  summary{padding-top:.4rem;padding-bottom:.4rem}
+  .x{width:44px;height:44px;right:.3rem;top:.3rem}
+}
 """
 
 HEAD_LINKS = ('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">'
@@ -685,6 +727,12 @@ FOOTER = ('<footer class="footer"><strong>Office of the Registrar</strong> · So
 FLASH_JS = ("document.querySelectorAll('.msg').forEach(m=>{m.style.cursor='pointer';m.title='Click to dismiss';"
             "const rm=()=>{m.style.opacity=0;setTimeout(()=>m.remove(),350)};m.addEventListener('click',rm);"
             "setTimeout(rm,{{ flash_ms }})});")
+# Touch feedback: instant press effect on every button / link / menu item (phones & tablets).
+TOUCH_JS = ("document.addEventListener('touchstart',e=>{"
+            "const b=e.target.closest('button,.btn,.si,.mb,.nav-menu a,.dd a,.theme-btn,.pen,.stat,.plink,summary');"
+            "if(b)b.classList.add('tap')},{passive:true});"
+            "['touchend','touchcancel'].forEach(n=>document.addEventListener(n,()=>{"
+            "document.querySelectorAll('.tap').forEach(x=>x.classList.remove('tap'))},{passive:true}));")
 
 # ========== LOGIN / REGISTER ==========
 # Light frosted card with a gold top edge, over the tinted office photo.
@@ -721,6 +769,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
 .lcard input:focus,.lcard select:focus{border-color:#003d1f;box-shadow:0 0 0 3px rgba(0,61,31,.18)}
 .lcard .btn{background:#003d1f;color:#fff;border-radius:12px;padding:.9rem 1.2rem;font-size:1rem;box-shadow:none}
 .lcard .btn:hover{background:#005a2d;box-shadow:0 4px 12px rgba(0,61,31,.3)}
+@media (hover:none){.lcard .btn:hover{background:#003d1f;box-shadow:none}}
 .lcard .hint{color:#5d6a62}
 .lcard .msg{background:#eefaf1;color:#14532d;border-color:#2e9d68}
 .lcard .msg.error{background:#fff2f2;color:#a30000;border-color:#e53935}
@@ -728,6 +777,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
 .tpw{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:#5d6a62;cursor:pointer;
  font-size:.84rem;font-weight:500;height:40px;padding:0 .7rem}
 .tpw:hover{color:#003d1f}
+.tpw:active{transform:translateY(-50%) scale(.95);filter:none}
 .row{display:flex;justify-content:space-between;align-items:center;margin:.2rem 0 1.2rem;flex-wrap:wrap;gap:.5rem}
 .row label{display:flex;align-items:center;gap:.45rem;margin:0;font-weight:600}.row input{width:auto}
 .lkb,a.lk{color:#003d1f;text-decoration:none;font-size:.88rem;background:none;border:0;cursor:pointer;font-weight:500}
@@ -846,6 +896,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
  <div class="mbtn"><button type="button" class="btn btn-sm" onclick="closeTerms()">I understand</button></div></div></div>
 
 <script>
+""" + TOUCH_JS + """
 function tp(id,b){const i=document.getElementById(id),s=i.type==='password';i.type=s?'text':'password';
  b.textContent=s?'Hide':'Show';b.setAttribute('aria-label',s?'Hide password':'Show password')}
 function lv(){const l=document.getElementById('level');if(!l)return;const c=l.value!=='lhs';
@@ -1086,7 +1137,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
  <div class="mbtn"><button type="button" class="btn btn-sm btn-ghost" id="cropCancel">Cancel</button><button type="button" class="btn btn-sm" id="cropOk">Use photo</button></div></div></div>
 """ + FOOTER + """
 <script>
-""" + FLASH_JS + THEME_JS + """
+""" + FLASH_JS + THEME_JS + TOUCH_JS + """
 const links=document.querySelectorAll('.nav-menu a[href^="#"]'),secs=document.querySelectorAll('.section'),mb=document.getElementById('moreBtn'),dd=document.getElementById('dd');
 function sw(id){if(!document.getElementById(id))id='home';
  links.forEach(l=>l.classList.toggle('active',l.getAttribute('href')==='#'+id));
@@ -1229,6 +1280,7 @@ form.in{display:inline}
  .tb{padding:.7rem 1rem}.content{padding:1rem}.who span{display:none}
 }
 @media(max-width:560px){.tiles{grid-template-columns:1fr 1fr}.ax.bx{font-size:17px}.tile{padding:.9rem}.tile i{font-size:1.4rem}}
+@media (hover:none){.si:not(.active):hover{background:transparent;color:var(--mut)}.gres a:hover{background:none}}
 </style></head><body class="adm">
 """ + BLUR_BG + """
 {% macro who(name, sid, av) %}<div class="nm">{% if av %}<img src="{{ av }}" alt="">{% else %}<span class="avi"><i class="fas fa-user"></i></span>{% endif %}<a href="#" class="plink" data-sid="{{ sid }}">{{ name }}</a></div>{% endmacro %}
@@ -1378,7 +1430,7 @@ form.in{display:inline}
   <div class="mbtn" style="justify-content:flex-end"><button type="button" class="btn btn-sm btn-ghost" id="pmCancel">Cancel</button><button class="btn btn-sm">Save changes</button></div></form>
 </div></div>
 <script>
-""" + FLASH_JS + THEME_JS + """
+""" + FLASH_JS + THEME_JS + TOUCH_JS + """
 const tabs=document.querySelectorAll('.si[data-tab]'),cs=document.querySelectorAll('.tab-content');
 function go(id){if(!document.getElementById(id))id='overview';tabs.forEach(t=>t.classList.toggle('active',t.dataset.tab===id));
  cs.forEach(c=>c.classList.toggle('active',c.id===id));history.replaceState(null,'','#'+id);document.body.classList.remove('sbo');window.scrollTo(0,0)}
