@@ -16,7 +16,7 @@ app.config['MAX_CONTENT_LENGTH'] = 3 * 1024 * 1024      # profile photo upload l
 # ========== CONFIG ==========
 LOGO_URL = "/static/JGE_LOGO.png"          # put your logo at static/JGE.jpg
 BACKGROUND_URL = "/static/Office.jpg" # login page background photo: static/Office.jpg
-BANNER_URL = "/static/bannerjge.png"  # rectangular photo on the home page (falls back to Office.jpg)
+BANNER_URL = "/static/banner.png"  # rectangular photo on the home page (falls back to Office.jpg)
 ABOUT_BANNER_URL = "/static/Fronts.jpg" # rectangular photo on top of About Us (falls back to Banner.jpg, then Office.jpg)
 AVATAR_DIR = os.path.join(app.static_folder, 'avatars')   # uploaded profile pictures
 os.makedirs(AVATAR_DIR, exist_ok=True)
