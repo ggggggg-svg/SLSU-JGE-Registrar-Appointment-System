@@ -1,5 +1,8 @@
 import calendar
+import hashlib
+import hmac
 import json
+import secrets
 import smtplib
 import threading
 import time
@@ -13,7 +16,6 @@ from datetime import datetime, date, timedelta
 from flask import (Flask, render_template_string, request, session, redirect,
                    flash, jsonify)
 from werkzeug.security import generate_password_hash, check_password_hash
-from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from markupsafe import escape
 
 app = Flask(__name__)
@@ -43,7 +45,7 @@ COURSES = [
     "Bachelor of Secondary Education major in English",
     "Bachelor of Secondary Education major in Mathematics",
     "Bachelor of Secondary Education major in Science",
-    
+
     "Bachelor of Science in Fisheries and Aquatic Science",
 ]
 YEARS = ["1st Year", "2nd Year", "3rd Year", "4th Year", "5th Year", "Graduated / Alumni", "Others"]
@@ -244,7 +246,7 @@ ABOUT = dict(
 )
 # ============================
 
-# In-memory databases (reset on restart)
+# In-memory databases (reset on restart; saved permanently by the database section below)
 pending_accounts, approved_users, appointments_db = {}, {}, {}
 rejected_accounts = set()
 feedback_db = []
@@ -428,92 +430,94 @@ def render(tpl, **kw):
                                   today=date.today().isoformat(), **kw)
 
 
-# ========== MYSQL: permanent storage ==========
-# Needs:  pip install pymysql cryptography      (MySQL 5.7+/8 or MariaDB)
-# Set with environment variables (defaults shown):  DB_HOST=127.0.0.1 DB_PORT=3306 DB_USER=root DB_PASSWORD= DB_NAME=slsu_registrar
-# The database and the tables are created automatically on first start.
-DB_NAME = os.environ.get('DB_NAME', 'slsu_registrar')
-DB_CFG = dict(host=os.environ.get('DB_HOST', '127.0.0.1'), port=int(os.environ.get('DB_PORT', '3306')),
-              user=os.environ.get('DB_USER', 'root'), password=os.environ.get('DB_PASSWORD', ''),
-              charset='utf8mb4', autocommit=True, connect_timeout=8)
+# ========== PERMANENT DATABASE (SQLAlchemy) ==========
+# Needs:  pip install flask-sqlalchemy
+# Default: SQLite file "registrar.db" next to this file (no setup needed, data survives restarts).
+# Optional: set DATABASE_URL (e.g. mysql+pymysql://user:pass@host/slsu_registrar) to use another database.
+# Tables are created automatically on first start and every record is loaded back into memory.
+from flask_sqlalchemy import SQLAlchemy
+
+basedir = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or \
+    'sqlite:///' + os.path.join(basedir, 'registrar.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
 DB_STATE = dict(on=False, dirty=False, snap={}, fb_saved=0)
 DB_LOCK = threading.Lock()
+
+
+class Account(db.Model):
+    __tablename__ = 'accounts'
+    email = db.Column(db.String(190), primary_key=True)
+    status = db.Column(db.String(10), nullable=False, index=True)       # approved / pending / rejected
+    student_id = db.Column(db.String(60), index=True)
+    full_name = db.Column(db.String(190))
+    data = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class AppointmentRec(db.Model):
+    __tablename__ = 'appointments'
+    id = db.Column(db.String(20), primary_key=True)
+    email = db.Column(db.String(190), nullable=False, index=True)
+    status = db.Column(db.String(12), nullable=False)
+    sched_date = db.Column(db.String(10), index=True)
+    sched_time = db.Column(db.String(40))
+    document = db.Column(db.String(190))
+    data = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class FeedbackRec(db.Model):
+    __tablename__ = 'feedback'
+    id = db.Column(db.Integer, primary_key=True)
+    data = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
 
 
 def _dump(o):
     return json.dumps(o, ensure_ascii=False, sort_keys=True, default=str)
 
 
-def db_conn(use_db=True):
-    import pymysql
-    cfg = dict(DB_CFG)
-    if use_db:
-        cfg['database'] = DB_NAME
-    return pymysql.connect(**cfg)
-
-
 def init_db():
-    """Create the database/tables if needed, then load every record into memory."""
+    """Create the tables if needed, then load every saved record into memory."""
     try:
-        c = db_conn(False)
-        with c.cursor() as cur:
-            cur.execute(f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-        c.close()
-        c = db_conn()
-        with c.cursor() as cur:
-            cur.execute("""CREATE TABLE IF NOT EXISTS accounts (
-                email VARCHAR(190) NOT NULL PRIMARY KEY, status VARCHAR(10) NOT NULL,
-                student_id VARCHAR(60) NULL, full_name VARCHAR(190) NULL, data LONGTEXT NOT NULL,
-                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                INDEX idx_status (status), INDEX idx_student (student_id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
-            cur.execute("""CREATE TABLE IF NOT EXISTS appointments (
-                id VARCHAR(20) NOT NULL PRIMARY KEY, email VARCHAR(190) NOT NULL, status VARCHAR(12) NOT NULL,
-                sched_date DATE NULL, sched_time VARCHAR(40) NULL, document VARCHAR(190) NULL, data LONGTEXT NOT NULL,
-                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                INDEX idx_email (email), INDEX idx_sched (sched_date, status)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
-            cur.execute("""CREATE TABLE IF NOT EXISTS feedback (
-                id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, data LONGTEXT NOT NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+        with app.app_context():
+            db.create_all()
             snap = {}
-            cur.execute("SELECT email, status, data FROM accounts")
-            for email, status, data in cur.fetchall():
-                d = json.loads(data)
-                if status == 'approved':
-                    approved_users[email] = d
-                elif status == 'pending':
-                    pending_accounts[email] = d
+            for r in Account.query.all():
+                d = json.loads(r.data)
+                if r.status == 'approved':
+                    approved_users[r.email] = d
+                elif r.status == 'pending':
+                    pending_accounts[r.email] = d
                 else:
-                    rejected_accounts.add(email)
-                snap[('acc', email)] = (status, _dump(d))
+                    rejected_accounts.add(r.email)
+                snap[('acc', r.email)] = (r.status, _dump(d))
             tmp = {}
-            cur.execute("SELECT email, data FROM appointments")
-            for email, data in cur.fetchall():
-                a = json.loads(data)
-                tmp.setdefault(email, []).append(a)
-                snap[('apt', a['id'])] = (email, _dump(a))
+            for r in AppointmentRec.query.all():
+                a = json.loads(r.data)
+                tmp.setdefault(r.email, []).append(a)
+                snap[('apt', a['id'])] = (r.email, _dump(a))
             for email, lst in tmp.items():
                 lst.sort(key=lambda a: a.get('submitted_at', ''))
                 appointments_db[email] = lst
-            cur.execute("SELECT data FROM feedback ORDER BY id")
-            for (data,) in cur.fetchall():
-                feedback_db.append(json.loads(data))
+            for r in FeedbackRec.query.order_by(FeedbackRec.id).all():
+                feedback_db.append(json.loads(r.data))
             DB_STATE.update(on=True, snap=snap, fb_saved=len(feedback_db))
-        c.close()
-        print(f"[MySQL] connected to '{DB_NAME}': {len(approved_users)} students, "
+        print(f"[DB] ready: {len(approved_users)} students, "
               f"{sum(len(v) for v in appointments_db.values())} appointments loaded")
     except Exception as ex:
         print("=" * 70)
-        print("[MySQL] NOT CONNECTED - data will be lost when the server stops!")
-        print("        reason:", ex)
-        print("        install:  pip install pymysql cryptography   and check DB_HOST/DB_USER/DB_PASSWORD")
+        print("[DB] NOT CONNECTED - data will be lost when the server stops!")
+        print("     reason:", ex)
+        print("     install:  pip install flask-sqlalchemy")
         print("=" * 70)
 
 
 def persist():
-    """Write only the rows that changed since the last save."""
+    """Write only the rows that changed since the last save (all-or-nothing)."""
     if not DB_STATE['on']:
         return
     with DB_LOCK:
@@ -522,50 +526,52 @@ def persist():
             acc.update({e: ('pending', u) for e, u in pending_accounts.items()})
             acc.update({e: ('rejected', {}) for e in rejected_accounts if e not in acc})
             apt = {a['id']: (e, a) for e, lst in appointments_db.items() for a in lst}
-            snap = DB_STATE['snap']
-            conn = db_conn()
-            with conn.cursor() as cur:
-                for e, (st, u) in acc.items():
-                    js = _dump(u)
-                    if snap.get(('acc', e)) != (st, js):
-                        cur.execute("REPLACE INTO accounts (email, status, student_id, full_name, data) VALUES (%s,%s,%s,%s,%s)",
-                                    (e, st, u.get('studentid'), u.get('fullname'), js))
-                        snap[('acc', e)] = (st, js)
-                for k in [k for k in snap if k[0] == 'acc' and k[1] not in acc]:
-                    cur.execute("DELETE FROM accounts WHERE email=%s", (k[1],))
-                    del snap[k]
-                for aid, (e, a) in apt.items():
-                    js = _dump(a)
-                    if snap.get(('apt', aid)) != (e, js):
-                        cur.execute("REPLACE INTO appointments (id, email, status, sched_date, sched_time, document, data) "
-                                    "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                                    (aid, e, a.get('status'), a.get('sched_date') or None, a.get('sched_time'),
-                                     a.get('document'), js))
-                        snap[('apt', aid)] = (e, js)
-                for k in [k for k in snap if k[0] == 'apt' and k[1] not in apt]:
-                    cur.execute("DELETE FROM appointments WHERE id=%s", (k[1],))
-                    del snap[k]
-                for fb in feedback_db[DB_STATE['fb_saved']:]:
-                    cur.execute("INSERT INTO feedback (data) VALUES (%s)", (_dump(fb),))
-                DB_STATE['fb_saved'] = len(feedback_db)
-            conn.close()
+            snap, new, gone = DB_STATE['snap'], {}, []
+            for e, (st, u) in acc.items():
+                js = _dump(u)
+                if snap.get(('acc', e)) != (st, js):
+                    db.session.merge(Account(email=e, status=st, student_id=u.get('studentid'),
+                                             full_name=u.get('fullname'), data=js))
+                    new[('acc', e)] = (st, js)
+            for k in [k for k in snap if k[0] == 'acc' and k[1] not in acc]:
+                Account.query.filter_by(email=k[1]).delete()
+                gone.append(k)
+            for aid, (e, a) in apt.items():
+                js = _dump(a)
+                if snap.get(('apt', aid)) != (e, js):
+                    db.session.merge(AppointmentRec(id=aid, email=e, status=a.get('status'),
+                                                    sched_date=a.get('sched_date') or None,
+                                                    sched_time=a.get('sched_time'), document=a.get('document'),
+                                                    data=js))
+                    new[('apt', aid)] = (e, js)
+            for k in [k for k in snap if k[0] == 'apt' and k[1] not in apt]:
+                AppointmentRec.query.filter_by(id=k[1]).delete()
+                gone.append(k)
+            for fb in feedback_db[DB_STATE['fb_saved']:]:
+                db.session.add(FeedbackRec(data=_dump(fb)))
+            db.session.commit()
+            snap.update(new)                      # only mark rows as saved after a successful commit
+            for k in gone:
+                snap.pop(k, None)
+            DB_STATE['fb_saved'] = len(feedback_db)
         except Exception as ex:
-            print("[MySQL] save failed:", ex)
+            db.session.rollback()
+            print("[DB] save failed:", ex)
 
 
 init_db()
 
 
-# ========== E-MAIL (reset links, approval / rejection notices) ==========
+# ========== E-MAIL (reset codes, approval / rejection notices) ==========
 # Gmail example:  SMTP_HOST=smtp.gmail.com  SMTP_PORT=587  SMTP_USER=you@gmail.com  SMTP_PASS=<16-char app password>
 # SITE_URL = public address of this site (e.g. https://registrar.example.com) so links in e-mails open correctly.
+# Without SMTP settings the e-mail text (including the reset code) is printed in the terminal instead.
 SMTP_HOST = os.environ.get('SMTP_HOST', '')
 SMTP_PORT = int(os.environ.get('SMTP_PORT', '587'))
 SMTP_USER = os.environ.get('SMTP_USER', '')
 SMTP_PASS = os.environ.get('SMTP_PASS', '')
 MAIL_FROM = os.environ.get('MAIL_FROM', '') or (f"SLSU JGE Registrar <{SMTP_USER}>" if SMTP_USER else 'no-reply@slsu.edu.ph')
 SITE_URL = os.environ.get('SITE_URL', '')
-RESET_COOLDOWN = {}
 
 
 def site_url():
@@ -627,8 +633,33 @@ def mail_account_result(email, u, ok):
         send_mail(email, subject, text, mail_html('Registration not approved', lines, ('Register Again', link)))
 
 
-def reset_serializer():
-    return URLSafeTimedSerializer(app.secret_key, salt='password-reset')
+# ========== FORGOT PASSWORD (6-digit code sent by e-mail) ==========
+RESET_CODES = {}                       # email -> dict(h=hash, exp=timestamp, tries=int, sent=timestamp)
+CODE_TTL, CODE_TRIES, CODE_COOLDOWN = 600, 5, 60     # valid 10 min, 5 attempts, 60 s between e-mails
+
+
+def _code_hash(email, code):
+    return hashlib.sha256(f"{app.secret_key}|{email}|{code}".encode()).hexdigest()
+
+
+def mask_email(e):
+    name, _, dom = e.partition('@')
+    return name[:2] + '*' * max(1, len(name) - 2) + '@' + dom
+
+
+def send_reset_code(e):
+    """Create a new 6-digit code (only its hash is kept) and e-mail it to the student."""
+    code = f"{secrets.randbelow(10 ** 6):06d}"
+    now = time.time()
+    RESET_CODES[e] = dict(h=_code_hash(e, code), exp=now + CODE_TTL, tries=0, sent=now)
+    u = approved_users[e]
+    name = escape(u.get('fn') or u.get('fullname') or 'Student')
+    lines = [f"Hi {name},", "Use this code to reset your Registrar Appointment password:",
+             f'<strong style="font-size:30px;letter-spacing:8px;color:#003d1f">{code}</strong>',
+             "The code works for <strong>10 minutes</strong>. If you did not ask for it, you can ignore this email."]
+    send_mail(e, f'{code} is your password reset code',
+              f"Hi {name}, your password reset code is {code} (valid for 10 minutes).",
+              mail_html('Your reset code', lines))
 
 
 # ========== NOTIFICATIONS, MENU, SURVEY ==========
@@ -669,6 +700,7 @@ def drawer_sub(u):
 
 def build_notifs(email, me):
     cleared = me.get('notif_cleared', '')
+    read = me.get('notif_read', '')           # time the student last opened the bell
     today = date.today()
     tomorrow = (today + timedelta(days=1)).isoformat()
     ev = []
@@ -688,7 +720,7 @@ def build_notifs(email, me):
             ev.append((a.get('missed_at', ''), 'fa-calendar-xmark', 'c2', 'Appointment not attended',
                        f"{a['document']} · {a['sched_label']}"))
     ev = sorted((x for x in ev if x[0] and x[0] > cleared), key=lambda x: x[0], reverse=True)[:15]
-    return [dict(icon=i, cls=c, title=t, sub=s_, when=_when(ts)) for ts, i, c, t, s_ in ev]
+    return [dict(icon=i, cls=c, title=t, sub=s_, when=_when(ts), new=ts > read) for ts, i, c, t, s_ in ev]
 
 
 # ========== SHARED CSS (deep green theme, light + dark) ==========
@@ -748,6 +780,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--pri);box
 .av-lg{width:110px;height:110px;border-radius:50%;object-fit:cover;border:3px solid var(--soft);flex:none;display:block}
 .av-ph{background:var(--soft);color:var(--acc);display:flex;align-items:center;justify-content:center;font-size:2.8rem}
 .av-row{display:flex;align-items:center;gap:1.4rem;margin-bottom:1.4rem;flex-wrap:wrap}.av-row>div:last-child{flex:1;min-width:200px}
+.av-row>.nmf{flex:1;min-width:260px}.nmf .form-group{margin-bottom:.6rem}
 .avwrap{position:relative;width:110px;height:110px;flex:none}
 .pen{position:absolute;right:0;bottom:0;width:34px;height:34px;border-radius:50%;border:3px solid var(--card);
  background:var(--pri);color:#fff;cursor:pointer;font-size:.75rem;display:flex;align-items:center;justify-content:center}
@@ -1027,17 +1060,9 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 }
 @media (min-width:1600px){.page-container{max-width:1480px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
-/* ========== MOBILE DRAWER MENU (layout copied from myschool.slsu.edu.ph) ========== */
+/* ========== MOBILE DRAWER MENU (opens from the right, burger beside the profile) ========== */
 .dmb{display:none;width:44px;height:44px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--acc);font-size:1.1rem;cursor:pointer;flex:none;align-items:center;justify-content:center}
 .dov,.drawer{display:none}
-.dpf{text-align:center;padding-bottom:1.1rem}
-.dav{width:120px;height:120px;margin:0 auto .9rem;background:#f2f2f2;display:flex;align-items:center;justify-content:center;overflow:hidden;color:#000;font-size:4.2rem}
-.dav img{width:100%;height:100%;object-fit:cover}
-.dnm{font-weight:700;font-size:1.05rem;letter-spacing:.2px;word-break:break-word}
-.dsb{font-size:.95rem;opacity:.9;margin-top:.15rem}
-.dsr{position:relative;margin:1rem 0 1.1rem}
-.dsr input{background:#fff;color:#1b2620;border:0;border-radius:6px;padding:.8rem 2.8rem .8rem .9rem;box-shadow:0 2px 6px rgba(0,0,0,.25);font-size:16px}
-.dsr i{position:absolute;right:.9rem;top:50%;transform:translateY(-50%);color:#555;pointer-events:none}
 .dmh{display:flex;justify-content:space-between;align-items:center;font-size:.92rem;margin:.2rem .2rem .6rem}
 .dmh button{background:none;border:0;color:#fff;font-size:1.05rem;cursor:pointer;padding:.4rem}
 .dnav a{display:flex;align-items:center;position:relative;color:#fff;text-decoration:none;padding:.95rem .6rem;border-radius:4px;font-size:1.05rem}
@@ -1055,11 +1080,12 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
  .logo-text h1{font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .logo-text p{display:none}
  .user-area{gap:.4rem;flex:none;flex-wrap:nowrap}
+ .user-area .theme-btn{display:none}
  .user-badge{padding:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;overflow:hidden}
  .user-badge .un{display:none}
  .user-badge .av{margin:0;width:40px;height:40px}
  .user-badge i{font-size:1.6rem}
- .drawer{display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;width:min(82vw,330px);background:#00402b;color:#fff;z-index:700;transform:translateX(-102%);transition:transform .28s ease;overflow-y:auto;padding:1.4rem 1rem 1.5rem;box-shadow:6px 0 24px rgba(0,0,0,.35)}
+ .drawer{display:flex;flex-direction:column;position:fixed;top:0;right:0;bottom:0;width:min(82vw,330px);background:#00402b;color:#fff;z-index:700;transform:translateX(102%);transition:transform .28s ease;overflow-y:auto;padding:1.4rem 1rem 1.5rem;box-shadow:-6px 0 24px rgba(0,0,0,.35)}
  .dov{display:block;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:650;opacity:0;pointer-events:none;transition:opacity .25s}
  body.dopen .drawer{transform:none}
  body.dopen .dov{opacity:1;pointer-events:auto}
@@ -1236,29 +1262,33 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
     <button type="button" class="tpw" onclick="tp('lp',this)" aria-label="Show password">Show</button></div></div>
    <div class="row"><label><input type="checkbox" name="remember"> Remember me</label>
     <a class="lk" href="/forgot">Forgot password?</a></div>
-   
+
    <button class="btn btn-full">Log In</button></form>
   <p class="center">No account yet? <a href="/register">Register here</a></p>
 
  {% elif page == 'forgot' %}
-  {% if sent %}
-  <div style="text-align:center;padding:1.6rem 0 .4rem"><i class="fas fa-envelope-circle-check" style="font-size:3rem;color:#003d1f"></i>
-   <h2 style="margin:1rem 0 .6rem;font-size:1.25rem;color:#003d1f">Check your email</h2></div>
-  <p style="text-align:center;line-height:1.6;color:#1b2620">If an account matches what you entered, we sent a password reset link to its Gmail address. The link works for <strong>1 hour</strong> and can be used once. Please also check your Spam folder.</p>
+  <div style="text-align:center;margin-top:1.4rem"><i class="fas fa-magnifying-glass" style="font-size:2.4rem;color:#003d1f"></i></div>
+  <h2 style="margin:.8rem 0 .3rem;font-size:1.4rem;color:#003d1f">Find your account</h2>
+  <p class="hint" style="font-size:.9rem">Enter your Gmail address or Student ID.</p>
+  <form method="POST" action="/forgot" class="lform" style="margin-top:1.1rem">
+   <div class="form-group"><input type="text" name="email" required autocomplete="username" placeholder="Gmail or Student ID"></div>
+   <button class="btn btn-full">Continue</button></form>
   <p class="center"><a href="/login">← Back to Log In</a></p>
-  {% else %}
-  <div style="text-align:center;margin-top:1.4rem"><i class="fas fa-key" style="font-size:2.4rem;color:#003d1f"></i>
-   <h2 style="margin:.8rem 0 .4rem;font-size:1.25rem;color:#003d1f">Forgot your password?</h2>
-   <p class="hint" style="font-size:.88rem">Enter your Gmail address or Student ID. We will email you a link to create a new password.</p></div>
-  <form method="POST" action="/forgot" class="lform" style="margin-top:1.2rem">
-   <div class="form-group"><label>Email or Student ID</label><input type="text" name="email" required autocomplete="username" placeholder="yourname@gmail.com or 2023-00123"></div>
-   <button class="btn btn-full">Send Reset Link</button></form>
-  <p class="center"><a href="/login">← Back to Log In</a></p>
-  {% endif %}
+
+ {% elif page == 'verify' %}
+  <div style="text-align:center;margin-top:1.4rem"><i class="fas fa-envelope-open-text" style="font-size:2.4rem;color:#003d1f"></i>
+   <h2 style="margin:.8rem 0 .4rem;font-size:1.3rem;color:#003d1f">Enter the code</h2>
+   <p class="hint" style="font-size:.9rem">We sent a 6-digit code to <strong>{{ masked }}</strong>. It works for 10 minutes. Please check your Spam folder too.</p></div>
+  <form method="POST" action="/forgot/verify" class="lform" style="margin-top:1.1rem">
+   <div class="form-group"><input type="text" name="code" required inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" style="text-align:center;font-size:1.6rem;letter-spacing:.5rem;font-weight:700"></div>
+   <button class="btn btn-full">Continue</button></form>
+  <form method="POST" action="/forgot/resend" style="text-align:center;margin-top:.9rem"><button type="submit" class="lkb">Didn't get a code? Resend code</button></form>
+  <p class="center"><a href="/forgot">← Use a different account</a></p>
+
  {% elif page == 'reset' %}
   <div style="text-align:center;margin-top:1.4rem"><i class="fas fa-lock" style="font-size:2.4rem;color:#003d1f"></i>
    <h2 style="margin:.8rem 0 .4rem;font-size:1.25rem;color:#003d1f">Create a new password</h2></div>
-  <form method="POST" action="/reset/{{ token }}" class="lform" style="margin-top:1.2rem">
+  <form method="POST" action="/forgot/new" class="lform" style="margin-top:1.2rem">
    <div class="form-group"><label>New Password</label><div class="iw"><input type="password" name="password" id="n1" required autocomplete="new-password">
     <button type="button" class="tpw" onclick="tp('n1',this)" aria-label="Show password">Show</button></div>
     <p class="hint">8+ characters · 1 uppercase · 1 number · 1 symbol (!@#$%^&*)</p></div>
@@ -1370,8 +1400,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <script>function fb(i){const l=(i.dataset.fb||'').split('|').filter(Boolean),n=l.shift();if(n){i.dataset.fb=l.join('|');i.src=n}else{i.remove()}}</script>
 <style>{{ css|safe }}</style></head><body class="sticky">
 """ + BLUR_BG + """
-<div class="top-bar">Republic of the Philippines · Southern Luzon State University — JGE Tagkawayan Campus</div>
-<header class="header-main"><button type="button" class="dmb" id="dopen" aria-label="Open menu"><i class="fas fa-bars"></i></button>
+<header class="header-main">
  <div class="logo-group">""" + LOGO_HTML + """<div class="logo-text"><h1>SLSU JGE TAGKAWAYAN</h1><p>Student Appointment Portal</p></div></div>
  <nav><ul class="nav-menu">
   <li><a href="#home" class="active">Home</a></li><li><a href="#services">Services</a></li>
@@ -1380,16 +1409,14 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <li><a href="#help">Help</a></li><li><a href="#about">About Us</a></li><li><a href="#faqs">FAQs</a></li><li><a href="#terms">Terms of Use</a></li>
    <li><a href="#privacy">Privacy Policy</a></li><li><a href="#contact">Contact Us</a></li><li><a href="#feedback">Send Feedback</a></li></ul></li></ul></nav>
  <div class="user-area">""" + THEME_BTN + """
-  <div class="bellw"><button type="button" class="bell" id="bell" aria-label="Notifications"><i class="fas fa-bell"></i>{% if notifs %}<span class="cnt" id="ncnt">{{ notifs|length }}</span>{% endif %}</button>
+  <div class="bellw"><button type="button" class="bell" id="bell" aria-label="Notifications"><i class="fas fa-bell"></i>{% set unread = notifs|selectattr('new')|list|length %}{% if unread %}<span class="cnt" id="ncnt">{{ unread }}</span>{% endif %}</button>
    <div class="npanel" id="npanel"><div class="nph"><span>Notifications</span><button type="button" id="nclear"><i class="fas fa-trash-can"></i> Clear all</button></div>
     <div class="nlist" id="nlist">{% for n in notifs %}<div class="ni"><span class="nic {{ n.cls }}"><i class="fas {{ n.icon }}"></i></span><div><b>{{ n.title }}</b><small>{{ n.sub }}</small></div><span class="nw">{{ n.when }}</span></div>{% else %}<div class="nempty"><i class="fas fa-bell-slash"></i><br>You are all caught up</div>{% endfor %}</div></div></div>
-  <a href="#profile" class="user-badge" onclick="sw('profile');return false">{% if avatar %}<img class="av" src="{{ avatar }}" alt="">{% else %}<i class="fas fa-user-circle"></i>{% endif %} <span class="un">{{ session.fullname }}</span></a></div>
+  <a href="#profile" class="user-badge" onclick="sw('profile');return false">{% if avatar %}<img class="av" src="{{ avatar }}" alt="">{% else %}<i class="fas fa-user-circle"></i>{% endif %} <span class="un">{{ session.fullname }}</span></a>
+  <button type="button" class="dmb" id="dopen" aria-label="Open menu"><i class="fas fa-bars"></i></button></div>
 </header>
 <div class="dov" id="dov"></div>
 <aside class="drawer" id="drawer" aria-label="Menu">
- <div class="dpf"><div class="dav">{% if avatar %}<img src="{{ avatar }}" alt="">{% else %}<i class="fas fa-user"></i>{% endif %}</div>
-  <div class="dnm">{{ session.fullname|upper }}</div><div class="dsb">{{ drawer_sub }}</div></div>
- <div class="dsr"><input type="search" id="dq" placeholder="Search menu..." autocomplete="off"><i class="fas fa-magnifying-glass"></i></div>
  <div class="dmh"><span>Menu</span><button type="button" id="dref" aria-label="Refresh"><i class="fas fa-rotate-right"></i></button></div>
  <nav class="dnav" id="dnav">
   <a href="#home" data-go="home" class="active"><i class="fas fa-house"></i><span>Home</span></a>
@@ -1404,6 +1431,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <a href="#privacy" data-go="privacy"><i class="fas fa-shield-halved"></i><span>Privacy Policy</span></a>
   <a href="#contact" data-go="contact"><i class="fas fa-address-book"></i><span>Contact Us</span></a>
   <a href="#feedback" data-go="feedback"><i class="fas fa-comment-dots"></i><span>Send Feedback</span></a>
+  <a href="#" id="dtheme"></a>
   <hr><a href="/logout"><i class="fas fa-right-from-bracket"></i><span>Sign Out</span></a>
  </nav></aside>
 <div class="page-container">
@@ -1471,7 +1499,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   {% if active_appts %}<div class="card tw"><table class="rt"><tr class="hr"><th>#</th><th>Document</th><th>Date</th><th>Time</th><th>Payment</th><th>Comments</th><th>Status</th></tr>
    {% for a in active_appts %}<tr><td data-label="#">{{ loop.index }}</td><td data-label="Document">{{ a.document }}</td><td data-label="Date">{{ a.sched_label }}</td><td data-label="Time">{{ a.sched_time }}</td><td data-label="Payment">{{ a.payment }}</td><td class="wrap" data-label="Comments">{{ a.comment or '—' }}</td><td data-label="Status"><span class="bdg pend">{{ a.status }}</span></td></tr>{% endfor %}</table></div>
   {% else %}<div class="card empty">You have no upcoming appointments. <a href="#book" onclick="sw('book')" style="color:var(--acc)">Book one now</a>.</div>{% endif %}
-  
+
   {% if active_appts %}<div class="reqbox"><div class="rq-h"><i class="fas fa-clipboard-check"></i> Reminder: bring these on your appointment date</div>
    {% for a in active_appts %}{% set key = doc_reqs.get(a.document) %}{% if key %}<div class="rq-key"><div class="rq-kt"><i class="fas fa-triangle-exclamation"></i> Important for {{ a.document }} · {{ a.sched_label }}</div><ul>{% for it in key %}<li>{{ it }}</li>{% endfor %}</ul></div>{% endif %}{% endfor %}
    </div>{% endif %}
@@ -1491,15 +1519,14 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
      <div class="pop" id="pop">
       <button type="button" id="popChoose"><i class="fas fa-image"></i> Change &amp; adjust photo</button>
       <button type="button" id="popRemove"><i class="fas fa-trash"></i> Remove photo</button></div></div>
-    <div><strong>{{ session.fullname }}</strong>
+    <div class="nmf"><div class="g3">
+      <div class="form-group"><label>First Name *</label><input name="first_name" required maxlength="60" value="{{ nm.fn }}"></div>
+      <div class="form-group"><label>Middle Name *</label><input name="middle_name" required maxlength="60" value="{{ nm.mn }}" placeholder="N/A if none"></div>
+      <div class="form-group"><label>Last Name *</label><input name="last_name" required maxlength="60" value="{{ nm.ln }}"></div></div>
      <p class="hint">Tap the pen to change, adjust or remove your photo, then press Save Profile.</p></div>
     <input type="file" name="avatar" id="avIn" accept="image/png,image/jpeg,image/webp,image/gif" class="hid">
     <input type="checkbox" name="remove_avatar" id="rmAv" class="hid">
     <input type="file" id="avPick" accept="image/png,image/jpeg,image/webp,image/gif" class="hid"></div>
-   <div class="g3">
-    <div class="form-group"><label>Last Name *</label><input name="last_name" required maxlength="60" value="{{ nm.ln }}"></div>
-    <div class="form-group"><label>First Name *</label><input name="first_name" required maxlength="60" value="{{ nm.fn }}"></div>
-    <div class="form-group"><label>Middle Name *</label><input name="middle_name" required maxlength="60" value="{{ nm.mn }}" placeholder="N/A if none"></div></div>
    <div class="g2 pf"><div class="form-group"><label>Email</label><input value="{{ session.email }}" readonly></div>
     <div class="form-group"><label>Student ID</label><input value="{{ session.studentid }}" readonly></div>
     <div class="form-group"><label>Birthday *</label><input type="date" name="birthday" class="bday" required autocomplete="bday" value="{{ me.get('birthday','') }}"></div>
@@ -1523,7 +1550,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
     <div class="g2"><div class="form-group"><label>New Password</label><input type="password" name="new" required autocomplete="new-password"><p class="hint">8+ characters with an uppercase letter, a number and a symbol</p></div>
      <div class="form-group"><label>Confirm New Password</label><input type="password" name="confirm" required autocomplete="new-password"></div></div>
     <button class="btn btn-sm btn-ghost">Update Password</button></form></details>
-  <a href="/logout" class="btn btn-danger btn-full"><i class="fas fa-sign-out-alt"></i> Sign Out</a></section>
+ </section>
  <section id="help" class="section"><h2 class="t">Help &amp; Student Guide</h2>
   <div class="card prose"><h3 class="ct"><i class="fas fa-route"></i> How to book your document, step by step</h3>
    <p>Follow these steps to request a document from the Registrar's Office.</p>
@@ -1536,12 +1563,12 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <div class="stp"><div class="n">7</div><div><h4>Submit the appointment</h4><p>Press <strong>Submit Appointment</strong>. You will find it under <strong>My Appointments</strong> as <span class="bdg pend">Pending</span>, and you will get a notification on the bell.</p></div></div>
    <div class="stp"><div class="n">8</div><div><h4>Visit the office and claim</h4><p>Come on your scheduled date and time with your requirements and valid ID. If someone claims for you, bring an authorization letter, a copy of your ID and the representative's valid ID.</p><p class="hint">Office days: {{ cdays }}</p></div></div></div>
   <div class="card prose"><h3 class="ct"><i class="fas fa-circle-question"></i> Common problems</h3>
-   <details><summary>I cannot sign in.</summary><p>Use the Gmail or Student ID you registered with. If you registered recently, your account may still be waiting for approval. Forgot your password? Press <strong>Forgot password?</strong> on the sign-in page and we will email you a reset link.</p></details>
+   <details><summary>I cannot sign in.</summary><p>Use the Gmail or Student ID you registered with. If you registered recently, your account may still be waiting for approval. Forgot your password? Press <strong>Forgot password?</strong> on the sign-in page and we will email you a 6-digit code to reset it.</p></details>
    <details><summary>The date I want is not accepted.</summary><p>Appointments must be on a future weekday (Monday to Friday). Weekends and today cannot be booked.</p></details>
    <details><summary>My time slot is full.</summary><p>Each time slot has limited capacity. Pick another time or another date.</p></details>
    <details><summary>The system will not let me submit.</summary><p>Check that every required field is filled, your mobile number is valid (09XXXXXXXXX) and the requirements confirmation is ticked.</p></details>
    <details><summary>I need to change my name, program, grade or section.</summary><p>Update your details in <strong>My Profile</strong> (click your name at the top). For a correction of name or records on official documents, request it from the Services list or visit the office.</p></details>
-   
+
    <details><summary>I need to change or cancel a booking.</summary><p>Please contact the Registrar's Office before your appointment date.</p></details></div>
   <div class="card prose"><h3 class="ct"><i class="fas fa-headset"></i> Still need help?</h3>
    <p>Read the <a href="#faqs" onclick="sw('faqs')" style="color:var(--acc)">FAQs</a>, see our <a href="#contact" onclick="sw('contact')" style="color:var(--acc)">contact details</a>, or send a message through <a href="#feedback" onclick="sw('feedback')" style="color:var(--acc)">Send Feedback</a>.</p></div></section>
@@ -1567,9 +1594,9 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <details><summary>Can someone claim my document for me?</summary><p>Yes, with an authorization letter, a copy of your ID and the representative's valid ID.</p></details>
   <details><summary>How do I change my password, details or profile picture?</summary><p>Open <strong>My Profile</strong> by clicking your name at the top of the page.</p></details>
   <details><summary>Where can I see my finished requests?</summary><p>Once the registrar marks your request as done, it moves to <strong>Completed Transactions</strong> under My Appointments, with the date and time it was completed.</p></details>
-  
+
   <details><summary>Can Laboratory High School students use this portal?</summary><p>Yes. Choose <strong>Laboratory High School Student</strong> when you register and enter your grade level and section. Your requests are listed for the registrar by grade level and section.</p></details>
-  <details><summary>I forgot my password.</summary><p>Press <strong>Forgot password?</strong> on the sign-in page. We will email a reset link to your Gmail address. The link works for 1 hour.</p></details></div></section>
+  <details><summary>I forgot my password.</summary><p>Press <strong>Forgot password?</strong> on the sign-in page, enter your Gmail or Student ID, and we will email a 6-digit code to your Gmail address. Enter the code, then choose a new password. The code works for 10 minutes.</p></details></div></section>
  <section id="terms" class="section"><h2 class="t">Terms of Use</h2><div class="card prose">
   <p class="hint">Last updated: October 17, 2026</p>
   <p>These Terms of Use govern your use of the SLSU JGE Tagkawayan Registrar Appointment System (the "System"), operated by the Office of the Registrar of Southern Luzon State University – JGE Tagkawayan Campus ("the Campus"). By creating an account or using the System you agree to these terms.</p>
@@ -1578,7 +1605,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <h4>3. Accurate information</h4><p>Give true, complete and current information, exactly as in your school records. False or misleading information, or using another person's identity, may lead to rejection, suspension or removal of your account and may be reported to the proper university office.</p>
   <h4>4. Appointments and document requests</h4><p>A booking is a request for a schedule, not a guarantee that your document is ready or will be released. Appointments are available on weekdays only, on future dates, and each time slot has limited capacity. Request only your own records, or records you are authorized to request.</p>
   <h4>5. Requirements, fees and claiming</h4><p>Bring the complete requirements shown for your document and a valid ID. Fees are paid at the SLSU JGE Campus Cashier. Processing times and fees follow the Registrar's policies and the Citizen's Charter and may change without prior notice. A representative may claim a document only with an authorization letter, a copy of your ID and the representative's valid ID.</p>
-  <h4>6. Notifications and emails</h4><p>The System may send notices to your registered Gmail address, such as account approval or rejection and password reset links, and shows reminders under the notification bell. Keep your email address correct and check your Spam folder.</p>
+  <h4>6. Notifications and emails</h4><p>The System may send notices to your registered Gmail address, such as account approval or rejection and password reset codes, and shows reminders under the notification bell. Keep your email address correct and check your Spam folder.</p>
   <h4>7. Acceptable use</h4><p>You agree not to: attempt to access other users' data or the admin area; upload harmful, unlawful or offensive content (including profile photos); interfere with, overload or try to break the System; submit false bookings or spam; or use automated tools to book appointments.</p>
   <h4>8. Feedback</h4><p>Feedback you send, including the Client Satisfaction Measurement form, may be used by the Campus to improve its services. Answering the form is optional.</p>
   <h4>9. Availability of the System</h4><p>We work to keep the System available, but we do not promise uninterrupted service. It may be unavailable during maintenance, power or internet interruptions, or events beyond our control. For urgent requests, visit the Registrar's Office during office days: {{ cdays }}</p>
@@ -1601,7 +1628,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <h4>3. Legal basis</h4><p>We process your information because it is necessary to provide the registrar services you request, to carry out the Campus's functions as a state university, and, where needed, with your consent, which you give when you register and use the System.</p>
   <h4>4. Who can see your information</h4><p>Only authorized Registrar's Office personnel and system administrators. We do not sell, rent or trade your information. We disclose it to other parties only when required by law or by a government agency with authority, such as CHED, or when you ask us to send a document to a third party (for example for authentication).</p>
   <h4>5. Storage, security and retention</h4><p>Records are kept in a secured database managed by the Campus. We use reasonable organizational, physical and technical safeguards, including hashed passwords, restricted admin access and limited login sessions. We keep your information while your account is active and as long as needed for school records and legal requirements, after which it is deleted or anonymized. No system is completely secure, so please protect your password.</p>
-  <h4>6. Emails</h4><p>We email you only about your account and requests: approval or rejection of your registration, password reset links and similar notices. We do not send advertising.</p>
+  <h4>6. Emails</h4><p>We email you only about your account and requests: approval or rejection of your registration, password reset codes and similar notices. We do not send advertising.</p>
   <h4>7. Your rights as a data subject</h4><p>You have the right to be informed; to access and get a copy of your personal data; to correct inaccurate data (you can update most details in My Profile); to object to or withdraw consent to processing; to request blocking, removal or destruction of your data when it is no longer needed or was unlawfully obtained; to data portability; to be indemnified for damages caused by inaccurate or unlawfully used data; and to file a complaint with the National Privacy Commission (privacy.gov.ph).</p>
   <h4>8. Minors</h4><p>Laboratory High School students may be under 18. Their parents or guardians may contact the Registrar's Office to review, correct or delete their child's information.</p>
   <h4>9. Cookies</h4><p>We use only the cookies needed to keep you signed in and to remember your display preference. We do not use advertising or tracking cookies. The Google Map on the About Us page is provided by Google and is subject to Google's own privacy policy.</p>
@@ -1709,17 +1736,20 @@ document.getElementById('cropOk').addEventListener('click',()=>{
   rmAv.checked=false;avPrev.src=URL.createObjectURL(b);avPrev.classList.remove('hid');avPh.classList.add('hid');
   crop.classList.remove('open')},'image/jpeg',.9)});
 
-/* ---- mobile drawer menu + notification bell ---- */
+/* ---- mobile drawer menu (right side) + dark mode inside it + notification bell ---- */
 function dOpen(o){document.body.classList.toggle('dopen',o)}
 document.getElementById('dopen').addEventListener('click',()=>dOpen(true));
 document.getElementById('dov').addEventListener('click',()=>dOpen(false));
 document.querySelectorAll('#dnav a[data-go]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();sw(a.dataset.go);dOpen(false)}));
-document.getElementById('dq').addEventListener('input',e=>{const q=e.target.value.trim().toLowerCase();
- document.querySelectorAll('#dnav a').forEach(a=>{a.style.display=a.textContent.toLowerCase().includes(q)?'':'none'})});
 document.getElementById('dref').addEventListener('click',()=>location.reload());
 document.addEventListener('keydown',e=>{if(e.key==='Escape')dOpen(false)});
+const dtm=document.getElementById('dtheme');
+if(dtm){const pt=()=>{const d=document.documentElement.dataset.theme==='dark';
+  dtm.innerHTML=d?'<i class="fas fa-sun"></i><span>Light Mode</span>':'<i class="fas fa-moon"></i><span>Dark Mode</span>'};
+ dtm.addEventListener('click',e=>{e.preventDefault();document.getElementById('themeBtn').click();pt()});pt()}
 const bl=document.getElementById('bell'),bp=document.getElementById('npanel');
-bl.addEventListener('click',e=>{e.stopPropagation();bp.classList.toggle('open')});
+bl.addEventListener('click',e=>{e.stopPropagation();bp.classList.toggle('open');
+ const c=document.getElementById('ncnt');if(c){c.remove();fetch('/notifications/read',{method:'POST'}).catch(()=>{})}});
 document.addEventListener('click',e=>{if(!e.target.closest('.bellw'))bp.classList.remove('open')});
 document.getElementById('nclear').addEventListener('click',()=>{
  fetch('/notifications/clear',{method:'POST'}).then(()=>{
@@ -1970,7 +2000,7 @@ form.in{display:inline}
   <div class="g2"><div class="form-group"><label>Contact number</label><input name="contact" id="fCt" placeholder="09XXXXXXXXX (leave empty to remove)"></div>
    <div class="form-group"><label>Address</label><input name="address" id="fAd" maxlength="200" placeholder="Leave empty to remove"></div></div>
   <label class="sw"><input type="checkbox" name="remove_avatar"> Remove the profile photo</label>
-  
+
   <div class="mbtn" style="justify-content:flex-end"><button type="button" class="btn btn-sm btn-ghost" id="pmCancel">Cancel</button><button class="btn btn-sm">Save changes</button></div></form>
 </div></div>
 <script>
@@ -2064,7 +2094,6 @@ gi.addEventListener('input',()=>{const q=gi.value.trim().toLowerCase();gr.innerH
 document.addEventListener('click',e=>{if(!e.target.closest('.gs'))gr.classList.remove('open')});
 </script></body></html>"""
 
-
 # ========== ROUTES ==========
 @app.before_request
 def auto_sweep():
@@ -2074,7 +2103,7 @@ def auto_sweep():
 
 @app.before_request
 def protect_routes():
-    if request.endpoint in ('static', 'reg_status', 'forgot', 'reset_password'):
+    if request.endpoint in ('static', 'reg_status', 'forgot', 'forgot_verify', 'forgot_resend', 'forgot_new'):
         return
     if request.endpoint in ('home', 'login', 'register'):
         if session.get('email'):
@@ -2208,7 +2237,7 @@ def dashboard():
     if session['email'] == ADMIN_EMAIL:
         return redirect('/admin')
     me = approved_users.get(session['email'])
-    if me is None:                      # stale session (e.g. server restarted)
+    if me is None:                      # stale session (e.g. account removed)
         session.clear()
         return redirect('/')
     mine = appointments_db.get(session['email'], [])
@@ -2618,55 +2647,93 @@ def reject():
     return redirect('/admin#accounts')
 
 
+# ---------- forgot password: find account -> e-mailed 6-digit code -> new password ----------
 @app.route('/forgot', methods=['GET', 'POST'])
 def forgot():
     if request.method != 'POST':
         return render(LOGIN_TPL, page='forgot')
     key = request.form.get('email', '').strip().lower()
     e = find_user(key) if key else None
-    if e and time.time() - RESET_COOLDOWN.get(e, 0) > 60:          # at most one e-mail per minute
-        RESET_COOLDOWN[e] = time.time()
-        u = approved_users[e]
-        token = reset_serializer().dumps(dict(e=e, h=u['password'][-16:]))
-        link = f"{site_url()}/reset/{token}"
-        name = escape(u.get('fn') or u.get('fullname') or 'Student')
-        lines = [f"Hi {name},", "We received a request to reset the password of your Registrar Appointment account.",
-                 "Press the button below to choose a new password. The link works for <strong>1 hour</strong> and can be used once.",
-                 "If you did not ask for this, you can ignore this email. Your password will stay the same."]
-        send_mail(e, 'Reset your Registrar Appointment password',
-                  f"Hi {name}, reset your password here (valid for 1 hour): {link}",
-                  mail_html('Reset your password', lines, ('Reset Password', link)))
-    return render(LOGIN_TPL, page='forgot', sent=True)        # same answer whether or not the account exists
+    if not e:
+        flash("We couldn't find an account with that Gmail or Student ID.", 'error')
+        return render(LOGIN_TPL, page='forgot')
+    session['reset_email'] = e
+    session.pop('reset_ok', None)
+    if time.time() - RESET_CODES.get(e, {}).get('sent', 0) > CODE_COOLDOWN:
+        send_reset_code(e)
+    return redirect('/forgot/verify')
 
 
-@app.route('/reset/<token>', methods=['GET', 'POST'])
-def reset_password(token):
-    try:
-        d = reset_serializer().loads(token, max_age=3600)
-    except SignatureExpired:
-        flash("This reset link has expired. Please request a new one.", 'error')
+@app.route('/forgot/verify', methods=['GET', 'POST'])
+def forgot_verify():
+    e = session.get('reset_email')
+    if e not in approved_users:
         return redirect('/forgot')
-    except BadSignature:
-        flash("This reset link is not valid. Please request a new one.", 'error')
+    masked = mask_email(e)
+    if request.method != 'POST':
+        return render(LOGIN_TPL, page='verify', masked=masked)
+    code = re.sub(r'\D', '', request.form.get('code', ''))
+    rec = RESET_CODES.get(e)
+    if not rec or time.time() > rec['exp']:
+        flash("This code has expired. Press Resend code to get a new one.", 'error')
+    elif rec['tries'] >= CODE_TRIES:
+        RESET_CODES.pop(e, None)
+        flash("Too many wrong attempts. Please request a new code.", 'error')
+    elif not hmac.compare_digest(rec['h'], _code_hash(e, code)):
+        rec['tries'] += 1
+        flash(f"Incorrect code. {CODE_TRIES - rec['tries']} attempt(s) left.", 'error')
+    else:
+        RESET_CODES.pop(e, None)
+        session['reset_ok'] = e
+        return redirect('/forgot/new')
+    return render(LOGIN_TPL, page='verify', masked=masked)
+
+
+@app.route('/forgot/resend', methods=['POST'])
+def forgot_resend():
+    e = session.get('reset_email')
+    if e not in approved_users:
         return redirect('/forgot')
-    u = approved_users.get(d.get('e'))
-    if u is None or u['password'][-16:] != d.get('h'):
-        flash("This reset link was already used or is no longer valid. Please request a new one.", 'error')
+    wait = CODE_COOLDOWN - int(time.time() - RESET_CODES.get(e, {}).get('sent', 0))
+    if wait > 0:
+        flash(f"Please wait {wait} seconds before requesting another code.", 'error')
+    else:
+        send_reset_code(e)
+        flash("A new code was sent to your email.", 'ok')
+    return redirect('/forgot/verify')
+
+
+@app.route('/forgot/new', methods=['GET', 'POST'])
+def forgot_new():
+    e = session.get('reset_ok')
+    if e not in approved_users:
+        flash("Please verify your code first.", 'error')
         return redirect('/forgot')
     if request.method != 'POST':
-        return render(LOGIN_TPL, page='reset', token=token)
+        return render(LOGIN_TPL, page='reset')
     pw, cpw = request.form.get('password', ''), request.form.get('confirm_pw', '')
     ok, msg = is_password_valid(pw)
     if not ok or pw != cpw:
         flash(msg if not ok else "Passwords do not match", 'error')
-        return render(LOGIN_TPL, page='reset', token=token)
-    u['password'] = generate_password_hash(pw)
-    send_mail(d['e'], 'Your Registrar Appointment password was changed',
+        return render(LOGIN_TPL, page='reset')
+    approved_users[e]['password'] = generate_password_hash(pw)
+    session.pop('reset_ok', None)
+    session.pop('reset_email', None)
+    send_mail(e, 'Your Registrar Appointment password was changed',
               "Your password was changed. If this was not you, contact the Registrar's Office right away.",
               mail_html('Password changed', ["Your password was just changed.",
                         "If this was not you, please contact the Registrar's Office right away."]))
     flash("✅ Password updated. You can now log in with your new password.", 'ok')
     return redirect('/login')
+
+
+@app.route('/notifications/read', methods=['POST'])
+def read_notifications():
+    """Opening the bell marks everything as read, so the red number disappears (and stays gone)."""
+    me = approved_users.get(session['email'])
+    if me is not None:
+        me['notif_read'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    return jsonify(ok=True)
 
 
 @app.route('/notifications/clear', methods=['POST'])
@@ -2679,7 +2746,7 @@ def clear_notifications():
 
 @app.after_request
 def save_changes(resp):
-    """Save to MySQL after every change (any POST, or when appointments were auto-marked missed)."""
+    """Save to the database after every change (any POST, or when appointments were auto-marked missed)."""
     if request.endpoint != 'static' and (request.method == 'POST' or DB_STATE['dirty']):
         DB_STATE['dirty'] = False
         persist()
@@ -2695,5 +2762,5 @@ def logout():
 if __name__ == '__main__':
     print("SLSU JGE TAGKAWAYAN — Registrar Appointment System")
     print(f"Admin login: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
-    print("Running at http://127.0.0.1:5000  (logo: static/jgetocopy.png)")
+    print("Running at http://127.0.0.1:5000  (logo: static/JGE_LOGO.png)")
     app.run(debug=os.environ.get('FLASK_DEBUG') == '1', port=5000)
