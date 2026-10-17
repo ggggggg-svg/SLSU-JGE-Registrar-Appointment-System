@@ -1129,7 +1129,7 @@ THEME_BTN = '<button type="button" class="theme-btn" id="themeBtn" aria-label="T
 LOGO_HTML = ('<div class="logo-circle"><span>SLSU</span><img src="{{ logo }}" alt="" '
              'onerror="this.remove()"></div>')
 BLUR_BG = '<div class="bgblur" style="background-image:url(\'{{ logo }}\')"></div>'
-FOOTER = ('<footer class="footer">'© 2026 Southern Luzon State University. All rights reserved. Proudly powered by '
+FOOTER = ('<footer class="footer">&copy; 2026 Southern Luzon State University. All rights reserved. Proudly powered by '
           '<strong>SLSU-JGE Tagkawayan ICT Student Government</strong></footer>')
 # Notifications: auto-remove after flash_ms, or on click.
 FLASH_JS = ("document.querySelectorAll('.msg').forEach(m=>{m.style.cursor='pointer';m.title='Click to dismiss';"
