@@ -4,9 +4,11 @@ import hmac
 import json
 import secrets
 import smtplib
+import ssl
 import threading
 import time
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 from urllib.parse import quote_plus
 import os
 import re
@@ -563,15 +565,28 @@ init_db()
 
 
 # ========== E-MAIL (reset codes, approval / rejection notices) ==========
-# Gmail example:  SMTP_HOST=smtp.gmail.com  SMTP_PORT=587  SMTP_USER=you@gmail.com  SMTP_PASS=<16-char app password>
-# SITE_URL = public address of this site (e.g. https://registrar.example.com) so links in e-mails open correctly.
+# HOW TO TURN ON E-MAIL (Gmail):
+#   1. Google Account > Security > turn on 2-Step Verification.
+#   2. Google Account > Security > App passwords > create one (16 letters, spaces are OK).
+#   3. Set these before starting the server (or type them in the quotes below):
+#        Windows CMD :  set SMTP_USER=yourname@gmail.com      set SMTP_PASS=abcd efgh ijkl mnop
+#        PowerShell  :  $env:SMTP_USER="yourname@gmail.com";  $env:SMTP_PASS="abcd efgh ijkl mnop"
+#        Linux / Mac :  export SMTP_USER=yourname@gmail.com   export SMTP_PASS="abcd efgh ijkl mnop"
+#   SMTP_HOST / SMTP_PORT are optional: they default to smtp.gmail.com : 587 (465 is tried automatically as a backup).
+#   SITE_URL = public address of this site (e.g. https://registrar.example.com) so links in e-mails open correctly.
+# Use the "Send test email" button at the bottom of the admin sidebar to check that it works.
 # Without SMTP settings the e-mail text (including the reset code) is printed in the terminal instead.
-SMTP_HOST = os.environ.get('SMTP_HOST', '')
-SMTP_PORT = int(os.environ.get('SMTP_PORT', '587'))
-SMTP_USER = os.environ.get('SMTP_USER', '')
-SMTP_PASS = os.environ.get('SMTP_PASS', '')
-MAIL_FROM = os.environ.get('MAIL_FROM', '') or (f"SLSU JGE Registrar <{SMTP_USER}>" if SMTP_USER else 'no-reply@slsu.edu.ph')
-SITE_URL = os.environ.get('SITE_URL', '')
+SMTP_USER = (os.environ.get('SMTP_USER') or '').strip()                       # you can type it here: 'yourname@gmail.com'
+SMTP_PASS = re.sub(r'\s+', '', os.environ.get('SMTP_PASS') or '')             # app password; spaces are removed
+SMTP_HOST = (os.environ.get('SMTP_HOST') or '').strip() or ('smtp.gmail.com' if SMTP_USER else '')
+SMTP_PORT = int(os.environ.get('SMTP_PORT') or 587)
+MAIL_FROM = (os.environ.get('MAIL_FROM') or '').strip() or (f"SLSU JGE Registrar <{SMTP_USER}>" if SMTP_USER else 'no-reply@slsu.edu.ph')
+SITE_URL = (os.environ.get('SITE_URL') or '').strip()
+MAIL_STATE = dict(last_error='', last_ok='')
+
+
+def mail_ready():
+    return bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
 
 
 def site_url():
@@ -590,27 +605,52 @@ def mail_html(title, lines, btn=None):
             'This is an automated message from the Registrar Appointment System. Please do not reply to this email.</p></div></div></div>')
 
 
-def send_mail(to, subject, text, html_body):
-    if not SMTP_HOST:
-        print(f"\n[MAIL not sent - SMTP is not configured]\nTo: {to}\nSubject: {subject}\n{text}\n")
-        return False
-
-    def _go():
+def send_mail_now(to, subject, text, html_body):
+    """Send one e-mail right now. Returns (ok, error_message). Tries the configured port, then the other Gmail port."""
+    if not mail_ready():
+        print(f"\n[MAIL not sent - e-mail is not set up (SMTP_USER / SMTP_PASS missing)]\nTo: {to}\nSubject: {subject}\n{text}\n")
+        return False, "E-mail is not set up yet. Set SMTP_USER and SMTP_PASS (see the E-MAIL section of the code)."
+    msg = EmailMessage()
+    msg['Subject'], msg['From'], msg['To'] = subject, MAIL_FROM, to
+    msg['Date'] = formatdate(localtime=True)
+    msg['Message-ID'] = make_msgid(domain=(SMTP_USER.split('@')[-1] or 'localhost'))
+    msg.set_content(text)
+    msg.add_alternative(html_body, subtype='html')
+    ctx = ssl.create_default_context()
+    alt = 465 if SMTP_PORT != 465 else 587
+    last = ''
+    for port in (SMTP_PORT, alt):
+        use_ssl = (port == 465)
         try:
-            msg = EmailMessage()
-            msg['Subject'], msg['From'], msg['To'] = subject, MAIL_FROM, to
-            msg.set_content(text)
-            msg.add_alternative(html_body, subtype='html')
-            s = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20) if SMTP_PORT == 465 else smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+            s = (smtplib.SMTP_SSL(SMTP_HOST, port, timeout=25, context=ctx) if use_ssl
+                 else smtplib.SMTP(SMTP_HOST, port, timeout=25))
             with s:
-                if SMTP_PORT != 465:
-                    s.starttls()
-                if SMTP_USER:
-                    s.login(SMTP_USER, SMTP_PASS)
+                s.ehlo()
+                if not use_ssl:
+                    s.starttls(context=ctx)
+                    s.ehlo()
+                s.login(SMTP_USER, SMTP_PASS)
                 s.send_message(msg)
+            MAIL_STATE.update(last_ok=datetime.now().strftime('%Y-%m-%d %H:%M:%S'), last_error='')
+            print(f"[MAIL] sent to {to}: {subject}")
+            return True, ''
+        except smtplib.SMTPAuthenticationError:
+            last = ("Gmail refused the login. Use a 16-letter App Password (not your normal Gmail password) "
+                    "and make sure 2-Step Verification is on.")
+            break                                   # a different port will not fix a wrong password
         except Exception as ex:
-            print("[MAIL ERROR]", ex)
-    threading.Thread(target=_go, daemon=True).start()
+            last = f"{type(ex).__name__}: {ex}"
+    MAIL_STATE['last_error'] = last
+    print("[MAIL ERROR]", last)
+    return False, last
+
+
+def send_mail(to, subject, text, html_body):
+    """Send in the background so the page does not wait. Returns False only when e-mail is not set up."""
+    if not mail_ready():
+        send_mail_now(to, subject, text, html_body)          # prints the e-mail (and reset code) in the terminal
+        return False
+    threading.Thread(target=send_mail_now, args=(to, subject, text, html_body), daemon=True).start()
     return True
 
 
@@ -657,9 +697,9 @@ def send_reset_code(e):
     lines = [f"Hi {name},", "Use this code to reset your Registrar Appointment password:",
              f'<strong style="font-size:30px;letter-spacing:8px;color:#003d1f">{code}</strong>',
              "The code works for <strong>10 minutes</strong>. If you did not ask for it, you can ignore this email."]
-    send_mail(e, f'{code} is your password reset code',
-              f"Hi {name}, your password reset code is {code} (valid for 10 minutes).",
-              mail_html('Your reset code', lines))
+    return send_mail(e, f'{code} is your password reset code',
+                     f"Hi {name}, your password reset code is {code} (valid for 10 minutes).",
+                     mail_html('Your reset code', lines))
 
 
 # ========== NOTIFICATIONS, MENU, SURVEY ==========
@@ -719,7 +759,7 @@ def build_notifs(email, me):
         elif a['status'] == 'Missed':
             ev.append((a.get('missed_at', ''), 'fa-calendar-xmark', 'c2', 'Appointment not attended',
                        f"{a['document']} · {a['sched_label']}"))
-    ev = sorted((x for x in ev if x[0] and x[0] > cleared), key=lambda x: x[0], reverse=True)[:15]
+    ev = sorted((x for x in ev if x[0] and x[0] > cleared), key=lambda x: x[0], reverse=True)[:50]
     return [dict(icon=i, cls=c, title=t, sub=s_, when=_when(ts), new=ts > read) for ts, i, c, t, s_ in ev]
 
 
@@ -781,6 +821,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--pri);box
 .av-ph{background:var(--soft);color:var(--acc);display:flex;align-items:center;justify-content:center;font-size:2.8rem}
 .av-row{display:flex;align-items:center;gap:1.4rem;margin-bottom:1.4rem;flex-wrap:wrap}.av-row>div:last-child{flex:1;min-width:200px}
 .av-row>.nmf{flex:1;min-width:260px}.nmf .form-group{margin-bottom:.6rem}
+.pname{color:var(--acc);font-size:1.45rem;line-height:1.3;font-weight:700;word-break:break-word}
 .avwrap{position:relative;width:110px;height:110px;flex:none}
 .pen{position:absolute;right:0;bottom:0;width:34px;height:34px;border-radius:50%;border:3px solid var(--card);
  background:var(--pri);color:#fff;cursor:pointer;font-size:.75rem;display:flex;align-items:center;justify-content:center}
@@ -1060,53 +1101,60 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 }
 @media (min-width:1600px){.page-container{max-width:1480px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
-/* ========== MOBILE DRAWER MENU (opens from the right, burger beside the profile) ========== */
+/* ========== MOBILE DRAWER MENU (white, opens from the right, burger beside the profile) ========== */
 .dmb{display:none;width:44px;height:44px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--acc);font-size:1.1rem;cursor:pointer;flex:none;align-items:center;justify-content:center}
 .dov,.drawer{display:none}
-.dmh{display:flex;justify-content:space-between;align-items:center;font-size:.92rem;margin:.2rem .2rem .6rem}
-.dmh button{background:none;border:0;color:#fff;font-size:1.05rem;cursor:pointer;padding:.4rem}
-.dnav a{display:flex;align-items:center;position:relative;color:#fff;text-decoration:none;padding:.95rem .6rem;border-radius:4px;font-size:1.05rem}
-.dnav a i{width:3.6rem;font-size:1.3rem;text-align:left;flex:none}
-.dnav a.active{background:rgba(255,255,255,.14)}
-.dnav a.active::before{content:"";position:absolute;left:-1rem;top:0;bottom:0;width:5px;border-radius:0 4px 4px 0;background:#f59e0b}
-.dnav a:active{background:rgba(255,255,255,.22)}
-.dnav hr{border:0;border-top:1px solid rgba(255,255,255,.18);margin:.5rem 0}
+.dmh{display:flex;justify-content:space-between;align-items:center;font-size:.92rem;font-weight:700;color:var(--acc);margin:.2rem .4rem .8rem}
+.dnav a{display:flex;align-items:center;position:relative;color:var(--tx);text-decoration:none;padding:.95rem .6rem;border-radius:10px;font-size:1.05rem;margin-bottom:.15rem}
+.dnav a i{width:3.2rem;font-size:1.3rem;text-align:left;flex:none;color:var(--acc)}
+.dnav a.active{background:var(--pri);color:#fff;font-weight:600}
+.dnav a.active i{color:#fff}
+.dnav a:active{background:var(--soft);color:var(--acc)}
+.dnav a.active:active{background:var(--hover);color:#fff}
+.dnav hr{border:0;border-top:1px solid var(--bd);margin:.5rem 0}
 @media(max-width:900px){
  .header-main{flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:space-between;text-align:left;padding:.6rem .8rem;gap:.5rem;position:sticky;top:0}
  .header-main nav{display:none}
  .dmb{display:inline-flex}
  .logo-group{flex:1;min-width:0;justify-content:flex-start}
  .logo-group .logo-circle{width:38px;height:38px}
+ .logo-text{min-width:0}
  .logo-text h1{font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- .logo-text p{display:none}
+ .logo-text p{display:block;font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .user-area{gap:.4rem;flex:none;flex-wrap:nowrap}
  .user-area .theme-btn{display:none}
  .user-badge{padding:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;overflow:hidden}
  .user-badge .un{display:none}
  .user-badge .av{margin:0;width:40px;height:40px}
  .user-badge i{font-size:1.6rem}
- .drawer{display:flex;flex-direction:column;position:fixed;top:0;right:0;bottom:0;width:min(82vw,330px);background:#00402b;color:#fff;z-index:700;transform:translateX(102%);transition:transform .28s ease;overflow-y:auto;padding:1.4rem 1rem 1.5rem;box-shadow:-6px 0 24px rgba(0,0,0,.35)}
+ .drawer{display:flex;flex-direction:column;position:fixed;top:0;right:0;bottom:0;width:min(82vw,330px);background:var(--card);color:var(--tx);z-index:700;transform:translateX(102%);transition:transform .28s ease;overflow-y:auto;padding:1.4rem 1rem 1.5rem;box-shadow:-6px 0 24px rgba(0,0,0,.25);border-left:1px solid var(--bd)}
  .dov{display:block;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:650;opacity:0;pointer-events:none;transition:opacity .25s}
  body.dopen .drawer{transform:none}
  body.dopen .dov{opacity:1;pointer-events:auto}
  body.dopen{overflow:hidden}
  .npanel{position:fixed;left:8px;right:8px;top:62px;width:auto}
+ .so-desk{display:none!important}
 }
+
+/* ========== SIGN OUT BUTTON (laptop / desktop, under the profile information) ========== */
+.so-desk{margin:0 0 1.4rem}
+.so-desk .btn{display:inline-flex;align-items:center;gap:.5rem}
 
 /* ========== NOTIFICATION BELL ========== */
 .bellw{position:relative}
 .bell{width:40px;height:40px;border-radius:50%;border:1px solid var(--bd);background:var(--card);color:var(--acc);cursor:pointer;position:relative;font-size:1rem}
 .bell:hover{background:var(--soft)}
 .bell .cnt{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:9px;background:#d93025;color:#fff;font-size:.68rem;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px}
-.npanel{display:none;position:absolute;right:0;top:48px;width:min(92vw,370px);background:var(--card);border:1px solid var(--bd);border-radius:14px;box-shadow:var(--sh);z-index:400;overflow:hidden}
+.npanel{display:none;position:absolute;right:0;top:48px;width:min(92vw,420px);background:var(--card);border:1px solid var(--bd);border-radius:14px;box-shadow:var(--sh);z-index:400;overflow:hidden}
 .npanel.open{display:block}
 .nph{display:flex;justify-content:space-between;align-items:center;padding:.8rem 1rem;border-bottom:1px solid var(--bd);font-weight:700;color:var(--acc)}
 .nph button{background:none;border:0;color:var(--acc);font-weight:600;font-size:.82rem;cursor:pointer}
-.nlist{max-height:360px;overflow:auto}
+.nlist{max-height:min(70vh,520px);overflow-y:auto;overflow-x:hidden}
 .ni{display:flex;gap:.7rem;padding:.8rem 1rem;border-bottom:1px solid var(--bd);align-items:flex-start}
 .ni:last-child{border-bottom:0}
-.ni b{display:block;font-size:.86rem}.ni small{display:block;color:var(--mut);font-size:.76rem;line-height:1.4}
-.ni>div{flex:1;min-width:0}.ni .nw{font-size:.68rem;color:var(--mut);text-align:right;max-width:64px;line-height:1.3}
+.ni b{display:block;font-size:.86rem;white-space:normal;overflow-wrap:anywhere;color:var(--tx)}
+.ni small{display:block;color:var(--mut);font-size:.78rem;line-height:1.45;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+.ni>div{flex:1;min-width:0}.ni .nw{font-size:.68rem;color:var(--mut);text-align:right;max-width:72px;line-height:1.3;flex:none}
 .nic{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex:none}
 .nic.c1{background:#d9eefb;color:#2f8fd1}.nic.c2{background:#fde7de;color:#e7824f}.nic.c3{background:#dcf5e3;color:#25a35a}
 .nempty{padding:2rem 1rem;text-align:center;color:var(--mut);font-size:.88rem;line-height:2}
@@ -1401,7 +1449,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <style>{{ css|safe }}</style></head><body class="sticky">
 """ + BLUR_BG + """
 <header class="header-main">
- <div class="logo-group">""" + LOGO_HTML + """<div class="logo-text"><h1>SLSU JGE TAGKAWAYAN</h1><p>Student Appointment Portal</p></div></div>
+ <div class="logo-group">""" + LOGO_HTML + """<div class="logo-text"><h1>SLSU JGE TAGKAWAYAN</h1><p>Office of the Registrar</p></div></div>
  <nav><ul class="nav-menu">
   <li><a href="#home" class="active">Home</a></li><li><a href="#services">Services</a></li>
   <li><a href="#book">Book Appointment</a></li><li><a href="#my-appointments">My Appointments</a></li>
@@ -1417,7 +1465,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 </header>
 <div class="dov" id="dov"></div>
 <aside class="drawer" id="drawer" aria-label="Menu">
- <div class="dmh"><span>Menu</span><button type="button" id="dref" aria-label="Refresh"><i class="fas fa-rotate-right"></i></button></div>
+ <div class="dmh"><span>Menu</span></div>
  <nav class="dnav" id="dnav">
   <a href="#home" data-go="home" class="active"><i class="fas fa-house"></i><span>Home</span></a>
   <a href="#services" data-go="services"><i class="fas fa-file-lines"></i><span>Services</span></a>
@@ -1519,14 +1567,17 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
      <div class="pop" id="pop">
       <button type="button" id="popChoose"><i class="fas fa-image"></i> Change &amp; adjust photo</button>
       <button type="button" id="popRemove"><i class="fas fa-trash"></i> Remove photo</button></div></div>
-    <div class="nmf"><div class="g3">
-      <div class="form-group"><label>First Name *</label><input name="first_name" required maxlength="60" value="{{ nm.fn }}"></div>
-      <div class="form-group"><label>Middle Name *</label><input name="middle_name" required maxlength="60" value="{{ nm.mn }}" placeholder="N/A if none"></div>
-      <div class="form-group"><label>Last Name *</label><input name="last_name" required maxlength="60" value="{{ nm.ln }}"></div></div>
+    <div class="nmf">
+     {% set mid = '' if (nm.mn or '').strip()|upper in ('', 'N/A') else nm.mn %}
+     <h3 class="pname" id="pName">{{ [nm.fn, mid, nm.ln]|select|join(' ') }}</h3>
      <p class="hint">Tap the pen to change, adjust or remove your photo, then press Save Profile.</p></div>
     <input type="file" name="avatar" id="avIn" accept="image/png,image/jpeg,image/webp,image/gif" class="hid">
     <input type="checkbox" name="remove_avatar" id="rmAv" class="hid">
     <input type="file" id="avPick" accept="image/png,image/jpeg,image/webp,image/gif" class="hid"></div>
+   <div class="g3">
+    <div class="form-group"><label>First Name *</label><input name="first_name" required maxlength="60" value="{{ nm.fn }}"></div>
+    <div class="form-group"><label>Middle Name *</label><input name="middle_name" required maxlength="60" value="{{ nm.mn }}" placeholder="N/A if none"></div>
+    <div class="form-group"><label>Last Name *</label><input name="last_name" required maxlength="60" value="{{ nm.ln }}"></div></div>
    <div class="g2 pf"><div class="form-group"><label>Email</label><input value="{{ session.email }}" readonly></div>
     <div class="form-group"><label>Student ID</label><input value="{{ session.studentid }}" readonly></div>
     <div class="form-group"><label>Birthday *</label><input type="date" name="birthday" class="bday" required autocomplete="bday" value="{{ me.get('birthday','') }}"></div>
@@ -1544,6 +1595,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
     {% endif %}
    <div class="form-group"><label>Address</label><input name="address" maxlength="200" placeholder="Barangay, Municipality, Province" value="{{ me.get('address','') }}"></div>
    <button class="btn">Save Profile</button></form></div>
+  <div class="so-desk"><a href="/logout" class="btn btn-danger"><i class="fas fa-right-from-bracket"></i> Sign Out</a></div>
   <details class="card pwd"><summary><i class="fas fa-lock"></i>&nbsp; Change password</summary>
    <form method="POST" action="/profile/password">
     <div class="form-group"><label>Current Password</label><input type="password" name="current" required autocomplete="current-password"></div>
@@ -1736,12 +1788,17 @@ document.getElementById('cropOk').addEventListener('click',()=>{
   rmAv.checked=false;avPrev.src=URL.createObjectURL(b);avPrev.classList.remove('hid');avPh.classList.add('hid');
   crop.classList.remove('open')},'image/jpeg',.9)});
 
+/* ---- printed name beside the photo follows the name fields (First Middle Last) ---- */
+(function(){const f=document.querySelector('form[action="/profile"]'),out=document.getElementById('pName');if(!f||!out)return;
+ const up=()=>{const v=n=>f.elements[n].value.trim();let m=v('middle_name');if(m.toUpperCase()==='N/A')m='';
+  out.textContent=[v('first_name'),m,v('last_name')].filter(Boolean).join(' ')};
+ ['first_name','middle_name','last_name'].forEach(n=>f.elements[n].addEventListener('input',up))})();
+
 /* ---- mobile drawer menu (right side) + dark mode inside it + notification bell ---- */
 function dOpen(o){document.body.classList.toggle('dopen',o)}
 document.getElementById('dopen').addEventListener('click',()=>dOpen(true));
 document.getElementById('dov').addEventListener('click',()=>dOpen(false));
 document.querySelectorAll('#dnav a[data-go]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();sw(a.dataset.go);dOpen(false)}));
-document.getElementById('dref').addEventListener('click',()=>location.reload());
 document.addEventListener('keydown',e=>{if(e.key==='Escape')dOpen(false)});
 const dtm=document.getElementById('dtheme');
 if(dtm){const pt=()=>{const d=document.documentElement.dataset.theme==='dark';
@@ -1801,6 +1858,8 @@ ADMIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 .si.active::before{content:"";position:absolute;left:-.8rem;top:20%;bottom:20%;width:4px;border-radius:0 4px 4px 0;background:var(--gold)}
 .si .bd2{margin-left:auto;background:var(--pri);color:#fff;border-radius:2rem;font-size:.68rem;font-weight:700;padding:.1rem .5rem;min-width:1.4rem;text-align:center}
 .sb-foot{margin-top:auto;padding-top:1rem;border-top:1px solid var(--bd)}
+.sb-foot form{margin:0}
+.sb-foot button.si{width:100%;background:none;border:0;text-align:left;font-family:inherit}
 .mainc{flex:1;min-width:0;display:flex;flex-direction:column}
 .tb{display:flex;align-items:center;gap:1rem;padding:.75rem 1.6rem;background:var(--card);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:200}
 .hamb{display:none;width:38px;height:38px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--acc);cursor:pointer}
@@ -1903,7 +1962,9 @@ form.in{display:inline}
   <a class="si" data-tab="users-list" href="#users-list"><i class="fas fa-user-graduate"></i> Students <span class="bd2">{{ total_approved }}</span></a>
   <a class="si" data-tab="feedback-list" href="#feedback-list"><i class="fas fa-comments"></i> Feedback <span class="bd2">{{ feedback|length }}</span></a>
  </nav>
- <div class="sb-foot"><a href="/logout" class="si" style="color:#c62828"><i class="fas fa-right-from-bracket"></i> Sign Out</a></div>
+ <div class="sb-foot">
+  <form method="POST" action="/admin/test-mail" onsubmit="return confirm('Send a test email to the e-mail account set in SMTP_USER?')"><button type="submit" class="si"><i class="fas fa-paper-plane"></i> Send test email</button></form>
+  <a href="/logout" class="si" style="color:#c62828"><i class="fas fa-right-from-bracket"></i> Sign Out</a></div>
 </aside>
 <div class="sbov" id="sbov"></div>
 <div class="mainc">
@@ -2565,6 +2626,19 @@ def lift_restriction():
     return redirect('/admin#missed')
 
 
+@app.route('/admin/test-mail', methods=['POST'])
+def admin_test_mail():
+    """Admin button: sends a real test e-mail right now and shows the exact result (or the reason it failed)."""
+    to = SMTP_USER or CONTACT_EMAIL
+    ok, err = send_mail_now(to, 'Registrar Appointment System - test email',
+                            "This is a test email from the Registrar Appointment System. E-mail is working.",
+                            mail_html('Test email', ["This is a test email from the Registrar Appointment System.",
+                                                     "If you can read this, e-mail is working."]))
+    flash(f"✅ Test email sent to {to}. Check the inbox (and Spam)." if ok else f"❌ Email failed: {err}",
+          'ok' if ok else 'error')
+    return redirect('/admin')
+
+
 @app.route('/admin/student/update', methods=['POST'])
 def admin_update_student():
     g = lambda k: request.form.get(k, '').strip()
@@ -2632,7 +2706,7 @@ def approve():
         approved_users[e] = pending_accounts.pop(e)
         approved_users[e]['approved_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         mail_account_result(e, approved_users[e], True)
-        flash(f"Approved {e}", 'ok')
+        flash(f"Approved {e}" + ("" if mail_ready() else " (no email sent: e-mail is not set up yet)"), 'ok')
     return redirect('/admin#accounts')
 
 
@@ -2643,7 +2717,7 @@ def reject():
     if rej:
         mail_account_result(e, rej, False)
         rejected_accounts.add(e)
-        flash(f"Rejected {e}", 'ok')
+        flash(f"Rejected {e}" + ("" if mail_ready() else " (no email sent: e-mail is not set up yet)"), 'ok')
     return redirect('/admin#accounts')
 
 
@@ -2660,7 +2734,9 @@ def forgot():
     session['reset_email'] = e
     session.pop('reset_ok', None)
     if time.time() - RESET_CODES.get(e, {}).get('sent', 0) > CODE_COOLDOWN:
-        send_reset_code(e)
+        if not send_reset_code(e):
+            flash("The email service is not set up yet, so the code could not be sent. "
+                  "Please contact the Registrar's Office.", 'error')
     return redirect('/forgot/verify')
 
 
@@ -2697,9 +2773,11 @@ def forgot_resend():
     wait = CODE_COOLDOWN - int(time.time() - RESET_CODES.get(e, {}).get('sent', 0))
     if wait > 0:
         flash(f"Please wait {wait} seconds before requesting another code.", 'error')
-    else:
-        send_reset_code(e)
+    elif send_reset_code(e):
         flash("A new code was sent to your email.", 'ok')
+    else:
+        flash("The email service is not set up yet, so the code could not be sent. "
+              "Please contact the Registrar's Office.", 'error')
     return redirect('/forgot/verify')
 
 
@@ -2762,5 +2840,9 @@ def logout():
 if __name__ == '__main__':
     print("SLSU JGE TAGKAWAYAN — Registrar Appointment System")
     print(f"Admin login: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
+    if mail_ready():
+        print(f"[MAIL] ready: {SMTP_USER} via {SMTP_HOST}:{SMTP_PORT}  (use 'Send test email' in the admin sidebar to check)")
+    else:
+        print("[MAIL] NOT set up: set SMTP_USER and SMTP_PASS (Gmail App Password). Codes are printed here until then.")
     print("Running at http://127.0.0.1:5000  (logo: static/JGE_LOGO.png)")
     app.run(debug=os.environ.get('FLASK_DEBUG') == '1', port=5000)
