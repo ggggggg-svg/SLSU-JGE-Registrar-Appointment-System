@@ -246,6 +246,70 @@ ABOUT = dict(
              "online appointment system. Students can now choose a schedule, state their request and track its status "
              "from a phone or computer, while registrar staff see who is coming, when and for what."],
 )
+
+# SLSU Quality Policy (Revision 5, effective March 8, 2024) - English and Filipino, shown under More > Quality Policy.
+QUALITY = dict(
+    en_intro=("The University as an excellent academic hub commits to develop a sustained culture of delivering "
+              "quality service and undertaking continuous innovations in instruction and relevant curricular "
+              "programs, transdisciplinary research, and responsive extension services supportive of national and "
+              "global development goals. Cognizant of our strong commitment, we shall ensure excellence in "
+              "operations and services by implementing and sustaining an internationally recognized quality "
+              "management system."),
+    en_through="Through these, we shall:",
+    tl_intro=("Ang unibersidad bilang isang mahusay na sentrong pang-akademiko na naglalayong luminang ng isang "
+              "kulturang nagbabahagi ng dekalidad na serbisyo at maka-pagsagawa ng tuloy-tuloy na inobasyon sa "
+              "instruksyon at mga kaugnay na programang kurikular, transdisiplinaryong pananaliksik, at serbisyong "
+              "ekstensyong tumutugon sa pambansa at pandaigdigang layuning pangkaunlaran. Kaugnay ng aming matibay "
+              "na pananagutan, aming titiyakin ang kahusayan sa aming operasyon sa paglilingkod sa pamamagitan ng "
+              "pagpapatupad at pagpapanatili ng internasyunal na pagkilala sa sistema ng dekalidad na pamamanihala. "
+              "Sa pamamagitan nito, kami ay:"),
+    items=[
+        ("Comply with applicable statutory and regulatory requirements, the mandates of the university and the "
+         "requisites of our quality management system;",
+         "Susunod sa mga naaayong batas at mga itinakdang pangangailangan, mandato ng unibersidad at ang kahingian "
+         "sa sistema ng dekalidad na pamamanihala;"),
+        ("Understand consistently the needs, expectations, and requirements of our internal and external clients;",
+         "Uunawa sa mga inaasahan at pangangailangan/kahingian ng ating panloob at panlabas na kliyente;"),
+        ("Establish quality objectives aimed at improving the efficiency and effectiveness of our operational "
+         "systems, processes, and procedures to sustain stakeholder's satisfaction;",
+         "Bubuo ng kalidad na layuning nakatuon sa pagpapaunlad ng kakayahan at kahusayan ng ating sistemang "
+         "operasyunal, mga proseso, at pamamaraan upang mapanatili ang kaluguran ng mga nasasakupan (stakeholder);"),
+        ("Assure our students, local and international partners, and other relevant interested parties of quality "
+         "service by offering the best learning experiences, and providing sustainable and innovative solutions to "
+         "local and global issues and problems;",
+         "Titiyakin sa ating mga mag-aaral, lokal at internasyunal na katuwang, at iba pang kaugnay na interesadong "
+         "panig ng kalidad na serbisyo sa pamamagitan ng pagbabahagi ng mahusay na karanasan sa pagkatuto, at "
+         "pagbibigay ng inobatibong solusyon sa mga lokal at global na isyu at suliranin;"),
+        ("Provide teaching and non-teaching personnel appropriate support mechanisms and capability programs, "
+         "thereby sustaining quality and competent services and promoting gender responsive and climate "
+         "resilience undertakings;",
+         "Maglalaan ng mga angkop na suportang mekanismo at mga programang huhubog sa kakayahan ng mga guro at "
+         "kawani ng paaralan, nang sa gayon ay mapanatili ang kalidad at mahusay na serbisyo at pagtataguyod sa "
+         "pangkasariang pagtugon at katatagang pangklima;"),
+        ("Promotes transdisciplinary collaboration that generates research-based technological achievements to "
+         "induce innovation, personal and professional competence towards greater productivity of its "
+         "stakeholders;",
+         "Magtataguyod ng kolaborasyong transdisiplinaryo na magbibigay sa mga naisagawang nakabatay sa "
+         "pananaliksik at teknolohiya upang makahikayat ng mga inobasyon, personal at propesyunal na kakayahan "
+         "tungo sa pagiging produktibo ng mga nasasakupan (stakeholder);"),
+        ("Produce morally upright and globally competitive graduates through Center of Excellence (CoE) in areas "
+         "of instruction, research, extension, and development; and global linkages;",
+         "Lilikha ng mga nagsipagtapos na may pagpapahalagang moral at pandaigdigang kagalingan sa pagiging Sentro "
+         "ng Kahusayan sa larangan ng pagtuturo, pananaliksik, ekstensyon, at pagpapaunlad; at ugnayang global;"),
+        ("Build God-loving and continuously productive citizens through leadership by example, and by promoting a "
+         "culture of quality at all functions and levels in the University;",
+         "Lilinang ng maka-Diyos at produktibong mamamayan sa pamamagitan ng huwarang pamumuno, at sa "
+         "pagtataguyod ng kultura ng kalidad sa lahat ng mga gampanin at antas ng unibersidad;"),
+        ("and Review and regularly update our quality management system to ensure its continuing relevance and "
+         "adequacy.",
+         "at Magsusuri at regular na maglilinang ang sistema ng kalidad na pamamahala upang masiguro ang patuloy "
+         "na kaugnayan at kasapatan nito."),
+    ],
+    signer="FREDERICK T. VILLA, DT",
+    signer_title="University President",
+    revision="Revision 5",
+    effective="Effective: March 8, 2024",
+)
 # ============================
 
 # In-memory databases (reset on restart; saved permanently by the database section below)
@@ -422,14 +486,22 @@ def delete_avatar(url):
             pass
 
 
+def account_activated():
+    """True while this browser registered an account that the admin has since approved and the student
+    has not logged in yet. The login page shows a reminder for as long as this is True."""
+    pe = session.get('pending_email')
+    return bool(pe and pe in approved_users)
+
+
 def render(tpl, **kw):
     return render_template_string(tpl, css=CSS, logo=LOGO_URL, bg=BACKGROUND_URL, banner=BANNER_URL,
-                                  about_banner=ABOUT_BANNER_URL, about=ABOUT, univ=UNIV, cemail=CONTACT_EMAIL,
+                                  about_banner=ABOUT_BANNER_URL, about=ABOUT, univ=UNIV, quality=QUALITY,
+                                  cemail=CONTACT_EMAIL,
                                   cfb=CONTACT_FACEBOOK, caddr=CONTACT_ADDRESS, cdays=OFFICE_DAYS,
                                   cphone=CONTACT_PHONE, flash_ms=FLASH_MS, courses=COURSES, years=YEARS,
                                   payments=PAYMENTS, times=TIMES, docs=DOCS, services=SERVICES, grades=GRADES, lhs=LHS,
                                   reqs=REQUIREMENTS, doc_reqs=DOC_REQUIREMENTS, map_q=quote_plus(MAP_QUERY), csm_sqd=CSM_SQD,
-                                  today=date.today().isoformat(), **kw)
+                                  today=date.today().isoformat(), activated=account_activated(), **kw)
 
 
 # ========== PERMANENT DATABASE (SQLAlchemy) ==========
@@ -574,7 +646,6 @@ init_db()
 #        Linux / Mac :  export SMTP_USER=yourname@gmail.com   export SMTP_PASS="abcd efgh ijkl mnop"
 #   SMTP_HOST / SMTP_PORT are optional: they default to smtp.gmail.com : 587 (465 is tried automatically as a backup).
 #   SITE_URL = public address of this site (e.g. https://registrar.example.com) so links in e-mails open correctly.
-# Use the "Send test email" button at the bottom of the admin sidebar to check that it works.
 # Without SMTP settings the e-mail text (including the reset code) is printed in the terminal instead.
 SMTP_USER = (os.environ.get('SMTP_USER') or '').strip()                       # you can type it here: 'yourname@gmail.com'
 SMTP_PASS = re.sub(r'\s+', '', os.environ.get('SMTP_PASS') or '')             # app password; spaces are removed
@@ -1206,6 +1277,22 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 .nbody small{display:block;margin-top:.35rem;color:var(--mut);font-size:.78rem}
 .nnew{background:#d93025;color:#fff;font-size:.66rem;font-weight:700;padding:.15rem .55rem;border-radius:2rem;flex:none}
 
+/* ========== QUALITY POLICY PAGE ========== */
+.qp-head{text-align:center;margin-bottom:1.4rem}
+.qp-head .logo-circle{width:84px;height:84px;margin:0 auto .8rem}
+.qp-head h3{font-size:1.5rem;color:var(--acc);font-weight:700;letter-spacing:.4px;line-height:1.25}
+.qp-head h4{margin:.3rem 0 0;font-size:1.25rem;color:var(--tx);font-weight:500}
+.qp-head p{color:var(--mut);font-weight:600;margin-top:.2rem}
+.qp-row{display:grid;grid-template-columns:1fr 1fr;gap:1.6rem;padding:1rem 0;border-top:2px dotted var(--bd)}
+.qp-row.first{border-top:0;padding-top:0}
+.qp-row p{margin:0;color:var(--tx);text-align:justify;line-height:1.7}
+.qp-row p.tl{color:var(--tx)}
+.qp-sign{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap;margin-top:1.4rem;padding-top:1.2rem;border-top:3px solid var(--acc)}
+.qp-sign b{display:block;color:var(--tx);font-size:1rem}
+.qp-sign span{color:var(--mut);font-size:.9rem}
+.qp-rev{font-size:.82rem;color:var(--mut);text-align:right;line-height:1.5}
+@media(max-width:700px){.qp-row{grid-template-columns:1fr;gap:.7rem}.qp-row p{text-align:left}.qp-rev{text-align:left}}
+
 """
 
 HEAD_LINKS = ('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">'
@@ -1281,6 +1368,13 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
 .lcard .hint{color:#5d6a62}
 .lcard .msg{background:#eefaf1;color:#14532d;border-color:#2e9d68}
 .lcard .msg.error{background:#fff2f2;color:#a30000;border-color:#e53935}
+
+/* ---- "Your account has been activated" reminder: stays until the student logs in ---- */
+.actv{display:flex;gap:.8rem;align-items:flex-start;margin-top:1rem;padding:.9rem 1rem;border-radius:12px;
+ background:#eefaf1;color:#14532d;border:1px solid #2e9d68;border-left:5px solid #2e9d68;font-size:.9rem;line-height:1.5}
+.actv i{font-size:1.4rem;color:#2e9d68;margin-top:.1rem}
+.actv b{display:block;font-size:.98rem;margin-bottom:.1rem}
+
 .iw{position:relative}.iw input{padding-right:4.2rem}
 .tpw{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:#5d6a62;cursor:pointer;
  font-size:.84rem;font-weight:500;height:40px;padding:0 .7rem}
@@ -1321,6 +1415,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
 <div class="lcard">
  <div class="lh">""" + LOGO_HTML + """<h1>SLSU JGE - Office of the Registrar</h1><p>JGE Tagkawayan Campus · Registrar Appointment System</p></div>
  {% for cat, m in get_flashed_messages(with_categories=true) %}<div class="msg {{ cat }}" style="margin-top:1rem">{{ m }}</div>{% endfor %}
+ {% if page == 'login' and activated %}<div class="actv" id="actv"><i class="fas fa-circle-check"></i><div><b>Your account has been activated</b>The Registrar's Office approved your account. You can now log in below.</div></div>{% endif %}
 
  {% if page == 'login' %}
   <form method="POST" action="/login" class="lform">
@@ -1475,7 +1570,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <li><a href="#home" class="active">Home</a></li><li><a href="#services">Services</a></li>
   <li><a href="#book">Book Appointment</a></li><li><a href="#my-appointments">My Appointments</a></li>
   <li class="more"><button type="button" id="moreBtn" class="mb">More ▾</button><ul class="dd" id="dd">
-   <li><a href="#help">Help</a></li><li><a href="#about">About Us</a></li><li><a href="#faqs">FAQs</a></li><li><a href="#terms">Terms of Use</a></li>
+   <li><a href="#help">Help</a></li><li><a href="#about">About Us</a></li><li><a href="#quality">Quality Policy</a></li><li><a href="#faqs">FAQs</a></li><li><a href="#terms">Terms of Use</a></li>
    <li><a href="#privacy">Privacy Policy</a></li><li><a href="#contact">Contact Us</a></li><li><a href="#feedback">Send Feedback</a></li></ul></li></ul></nav>
  <div class="user-area">""" + THEME_BTN + """
   <div class="bellw"><button type="button" class="bell" id="bell" aria-label="Notifications" onclick="sw('notifications')"><i class="fas fa-bell"></i>{% set unread = notifs|selectattr('new')|list|length %}{% if unread %}<span class="cnt" id="ncnt">{{ unread }}</span>{% endif %}</button></div>
@@ -1494,6 +1589,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <a href="#notifications" data-go="notifications"><i class="fas fa-bell"></i><span>Notifications</span></a>
   <a href="#help" data-go="help"><i class="fas fa-circle-question"></i><span>Help</span></a>
   <a href="#about" data-go="about"><i class="fas fa-building-columns"></i><span>About Us</span></a>
+  <a href="#quality" data-go="quality"><i class="fas fa-award"></i><span>Quality Policy</span></a>
   <a href="#faqs" data-go="faqs"><i class="fas fa-comments"></i><span>FAQs</span></a>
   <a href="#terms" data-go="terms"><i class="fas fa-file-contract"></i><span>Terms of Use</span></a>
   <a href="#privacy" data-go="privacy"><i class="fas fa-shield-halved"></i><span>Privacy Policy</span></a>
@@ -1672,6 +1768,14 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <div class="mapbtn"><a class="btn btn-sm" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query={{ map_q }}"><i class="fas fa-map"></i> Open in Google Maps</a>
     <a class="btn btn-sm btn-ghost" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination={{ map_q }}"><i class="fas fa-route"></i> Get directions</a></div></div>
   <div class="card prose"><h3 class="ct"><i class="fas fa-laptop"></i> What the system does</h3><ul><li>Lets students schedule document requests online.</li><li>Gives the registrar a clear list of who is coming, when and for what.</li><li>Limits each time slot so service stays orderly.</li></ul></div></section>
+ <section id="quality" class="section"><h2 class="t">Quality Policy</h2>
+  <div class="card prose">
+   <div class="qp-head">""" + LOGO_HTML + """<h3>SOUTHERN LUZON STATE UNIVERSITY</h3><h4>Quality Policy</h4><p>Patakarang Kalidad ng SLSU</p></div>
+   <div class="qp-row first"><div><p>{{ quality.en_intro }}</p><p style="margin-top:1rem"><strong>{{ quality.en_through }}</strong></p></div>
+    <div><p class="tl">{{ quality.tl_intro }}</p></div></div>
+   {% for en, tl in quality['items'] %}<div class="qp-row"><div><p>{{ en }}</p></div><div><p class="tl">{{ tl }}</p></div></div>{% endfor %}
+   <div class="qp-sign"><div><b>{{ quality.signer }}</b><span>{{ quality.signer_title }}</span></div>
+    <div class="qp-rev"><b style="font-size:.88rem">{{ quality.revision }}</b>{{ quality.effective }}</div></div></div></section>
  <section id="faqs" class="section"><h2 class="t">Frequently Asked Questions</h2><div class="card">
   <details><summary>Why can't I log in right after registering?</summary><p>New accounts must be approved by the administrator first. You can sign in once your account is activated.</p></details>
   <details><summary>Can I book on weekends or for today?</summary><p>No. The office is closed on weekends, and appointments must be booked for a future weekday.</p></details>
@@ -2003,7 +2107,6 @@ form.in{display:inline}
   <a class="si" data-tab="feedback-list" href="#feedback-list"><i class="fas fa-comments"></i> Feedback <span class="bd2">{{ feedback|length }}</span></a>
  </nav>
  <div class="sb-foot">
-  <form method="POST" action="/admin/test-mail" onsubmit="return confirm('Send a test email to the e-mail account set in SMTP_USER?')"><button type="submit" class="si"><i class="fas fa-paper-plane"></i> Send test email</button></form>
   <a href="/logout" class="si" style="color:#c62828"><i class="fas fa-right-from-bracket"></i> Sign Out</a></div>
 </aside>
 <div class="sbov" id="sbov"></div>
@@ -2016,7 +2119,7 @@ form.in{display:inline}
  </header>
  <div class="content">
  {% for cat, m in get_flashed_messages(with_categories=true) %}<div class="msg {{ cat }}">{{ m }}</div>{% endfor %}
- {% if not mail_on %}<div class="alert danger"><i class="fas fa-envelope-circle-check"></i><div><strong>Email is not set up.</strong><br>Students will not receive activation emails. Set <code>SMTP_USER</code> and <code>SMTP_PASS</code> (Gmail App Password), restart the server, then press <strong>Send test email</strong>.</div></div>{% elif mail_err %}<div class="alert danger"><i class="fas fa-triangle-exclamation"></i><div>The last email failed: {{ mail_err }}</div></div>{% endif %}
+ {% if not mail_on %}<div class="alert danger"><i class="fas fa-envelope-circle-check"></i><div><strong>Email is not set up.</strong><br>Students will not receive activation emails. Set <code>SMTP_USER</code> and <code>SMTP_PASS</code> (Gmail App Password), then restart the server.</div></div>{% elif mail_err %}<div class="alert danger"><i class="fas fa-triangle-exclamation"></i><div>The last email failed: {{ mail_err }}</div></div>{% endif %}
 
  <div class="tab-content active" id="overview">
   <div class="pn"><h3>Admin Dashboard</h3>
@@ -2224,12 +2327,11 @@ def too_large(e):
 
 
 def notify_registration_result():
-    """If this browser registered earlier, tell the student whether the account was approved."""
+    """If this browser registered earlier and was rejected, tell the student once.
+    (An approved account is NOT flashed here: the login page shows a persistent
+    'Your account has been activated' reminder until the student logs in.)"""
     pe = session.get('pending_email')
-    if pe in approved_users:
-        session.pop('pending_email', None)
-        flash("🎉 Your account has been approved! You can now sign in.", 'ok')
-    elif pe in rejected_accounts:
+    if pe in rejected_accounts:
         session.pop('pending_email', None)
         flash("Your registration was not approved. Please visit the Registrar's Office or register again.", 'error')
 
@@ -2264,12 +2366,14 @@ def login():
     session.permanent = bool(request.form.get('remember'))
 
     if key == ADMIN_EMAIL.lower() and pw == ADMIN_PASSWORD:
+        session.pop('pending_email', None)
         session.update(email=ADMIN_EMAIL, fullname='Administrator', studentid='ADMIN')
         return redirect('/admin')
 
     e = find_user(key)
     if e and check_password_hash(approved_users[e]['password'], pw):
         u = approved_users[e]
+        session.pop('pending_email', None)          # logged in: the "account activated" reminder goes away
         session.update(email=e, fullname=u['fullname'], studentid=u['studentid'])
         return redirect('/dashboard')
 
@@ -2667,19 +2771,6 @@ def lift_restriction():
     return redirect('/admin#missed')
 
 
-@app.route('/admin/test-mail', methods=['POST'])
-def admin_test_mail():
-    """Admin button: sends a real test e-mail right now and shows the exact result (or the reason it failed)."""
-    to = SMTP_USER or CONTACT_EMAIL
-    ok, err = send_mail_now(to, 'Registrar Appointment System - test email',
-                            "This is a test email from the Registrar Appointment System. E-mail is working.",
-                            mail_html('Test email', ["This is a test email from the Registrar Appointment System.",
-                                                     "If you can read this, e-mail is working."]))
-    flash(f"✅ Test email sent to {to}. Check the inbox (and Spam)." if ok else f"❌ Email failed: {err}",
-          'ok' if ok else 'error')
-    return redirect('/admin')
-
-
 @app.route('/admin/student/update', methods=['POST'])
 def admin_update_student():
     g = lambda k: request.form.get(k, '').strip()
@@ -2886,7 +2977,7 @@ if __name__ == '__main__':
     print("SLSU JGE TAGKAWAYAN — Registrar Appointment System")
     print(f"Admin login: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
     if mail_ready():
-        print(f"[MAIL] ready: {SMTP_USER} via {SMTP_HOST}:{SMTP_PORT}  (use 'Send test email' in the admin sidebar to check)")
+        print(f"[MAIL] ready: {SMTP_USER} via {SMTP_HOST}:{SMTP_PORT}")
     else:
         print("[MAIL] NOT set up: set SMTP_USER and SMTP_PASS (Gmail App Password). Codes are printed here until then.")
     print("Running at http://127.0.0.1:5000  (logo: static/JGE_LOGO.png)")
