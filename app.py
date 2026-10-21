@@ -655,22 +655,23 @@ def send_mail(to, subject, text, html_body):
 
 
 def mail_account_result(email, u, ok):
+    """Send the approval / rejection e-mail now. Returns (sent, error_message)."""
     name = escape(u.get('fn') or u.get('fullname') or 'Student')
     if ok:
         link = site_url() + '/login'
-        subject = 'Your Registrar Appointment account is approved'
-        lines = [f"Hi {name},", "Good news! The Registrar's Office has <strong>approved</strong> your account.",
+        subject = 'Your Registrar Appointment account is activated'
+        lines = [f"Hi {name},",
+                 "Good news! The Registrar's Office has <strong>approved and activated</strong> your account.",
                  "You can now log in with your Gmail address or Student ID and book your document appointment."]
-        text = f"Hi {name}, your account was approved. Log in here: {link}"
-        send_mail(email, subject, text, mail_html('Account approved', lines, ('Log In Now', link)))
-    else:
-        link = site_url() + '/register'
-        subject = 'Update on your Registrar Appointment registration'
-        lines = [f"Hi {name},", "We are sorry, but your registration was <strong>not approved</strong>.",
-                 "Please check that your details match your school records, then register again, "
-                 "or visit the Registrar's Office for help."]
-        text = f"Hi {name}, your registration was not approved. You may register again: {link}"
-        send_mail(email, subject, text, mail_html('Registration not approved', lines, ('Register Again', link)))
+        text = f"Hi {name}, your account is activated. Log in here: {link}"
+        return send_mail_now(email, subject, text, mail_html('Account activated', lines, ('Log In Now', link)))
+    link = site_url() + '/register'
+    subject = 'Update on your Registrar Appointment registration'
+    lines = [f"Hi {name},", "We are sorry, but your registration was <strong>not approved</strong>.",
+             "Please check that your details match your school records, then register again, "
+             "or visit the Registrar's Office for help."]
+    text = f"Hi {name}, your registration was not approved. You may register again: {link}"
+    return send_mail_now(email, subject, text, mail_html('Registration not approved', lines, ('Register Again', link)))
 
 
 # ========== FORGOT PASSWORD (6-digit code sent by e-mail) ==========
@@ -740,27 +741,31 @@ def drawer_sub(u):
 
 def build_notifs(email, me):
     cleared = me.get('notif_cleared', '')
-    read = me.get('notif_read', '')           # time the student last opened the bell
+    read = me.get('notif_read', '')           # time the student last opened the notifications page
     today = date.today()
     tomorrow = (today + timedelta(days=1)).isoformat()
     ev = []
     if me.get('approved_at'):
-        ev.append((me['approved_at'], 'fa-circle-check', 'c3', 'Account approved', 'You can now book your appointments.'))
+        ev.append((me['approved_at'], 'fa-circle-check', 'c3', 'Account activated',
+                   'Your account was approved by the Registrar. A confirmation email was sent to your Gmail. '
+                   'You can now book your appointments.', 'book'))
     for a in appointments_db.get(email, []):
         if a['status'] == 'Pending':
             ev.append((a['submitted_at'], 'fa-calendar-plus', 'c1', 'Appointment booked',
-                       f"{a['document']} · {a['sched_label']} · {a['sched_time']}"))
+                       f"{a['document']} · {a['sched_label']} · {a['sched_time']}", 'my-appointments'))
             if a['sched_date'] == tomorrow:
                 ev.append((today.isoformat() + ' 00:00:01', 'fa-bell', 'c2', 'Your appointment is tomorrow',
-                           f"{a['document']} · {a['sched_time']}. Bring the requirements for this document."))
+                           f"{a['document']} · {a['sched_time']}. Bring the requirements for this document.",
+                           'my-appointments'))
         elif a['status'] == 'Completed':
             ev.append((a.get('completed_raw', ''), 'fa-circle-check', 'c3', 'Request completed',
-                       f"{a['document']} · {a.get('completed_at', '')}"))
+                       f"{a['document']} · {a.get('completed_at', '')}", 'my-appointments'))
         elif a['status'] == 'Missed':
             ev.append((a.get('missed_at', ''), 'fa-calendar-xmark', 'c2', 'Appointment not attended',
-                       f"{a['document']} · {a['sched_label']}"))
+                       f"{a['document']} · {a['sched_label']}", 'my-appointments'))
     ev = sorted((x for x in ev if x[0] and x[0] > cleared), key=lambda x: x[0], reverse=True)[:50]
-    return [dict(icon=i, cls=c, title=t, sub=s_, when=_when(ts), new=ts > read) for ts, i, c, t, s_ in ev]
+    return [dict(icon=i, cls=c, title=t, sub=s_, go=g, when=_when(ts), new=ts > read)
+            for ts, i, c, t, s_, g in ev]
 
 
 # ========== SHARED CSS (deep green theme, light + dark) ==========
@@ -1185,6 +1190,22 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 .mapbtn{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.9rem}
 @media(max-width:600px){.mapbox iframe{height:300px}}
 
+/* ========== NOTIFICATIONS PAGE ========== */
+.nbar{display:flex;justify-content:space-between;align-items:center;gap:.8rem;flex-wrap:wrap;margin-bottom:1rem}
+.nftabs{display:flex;gap:.5rem}
+.nft{border:1px solid var(--bd);background:var(--card);color:var(--mut);padding:.55rem 1rem;border-radius:2rem;font-weight:600;font-size:.88rem;cursor:pointer}
+.nft.active{background:var(--pri);border-color:var(--pri);color:#fff}
+.nft.active .pill{background:#fff;color:var(--pri)}
+.nrow{display:flex;gap:1rem;align-items:flex-start;padding:1.1rem 1.2rem;margin-bottom:.8rem;background:var(--card);border:1px solid var(--bd);border-radius:14px;box-shadow:var(--sh);text-decoration:none;color:var(--tx);transition:.15s}
+.nrow:hover{border-color:var(--acc)}
+.nrow.unread{border-left:5px solid var(--gold);background:var(--soft)}
+.nrow .nic{width:46px;height:46px;font-size:1.2rem;border-radius:12px}
+.nbody{flex:1;min-width:0}
+.nbody b{display:block;font-size:1rem;color:var(--acc);margin-bottom:.2rem}
+.nbody p{color:var(--tx);line-height:1.55;font-size:.92rem}
+.nbody small{display:block;margin-top:.35rem;color:var(--mut);font-size:.78rem}
+.nnew{background:#d93025;color:#fff;font-size:.66rem;font-weight:700;padding:.15rem .55rem;border-radius:2rem;flex:none}
+
 """
 
 HEAD_LINKS = ('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">'
@@ -1457,9 +1478,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <li><a href="#help">Help</a></li><li><a href="#about">About Us</a></li><li><a href="#faqs">FAQs</a></li><li><a href="#terms">Terms of Use</a></li>
    <li><a href="#privacy">Privacy Policy</a></li><li><a href="#contact">Contact Us</a></li><li><a href="#feedback">Send Feedback</a></li></ul></li></ul></nav>
  <div class="user-area">""" + THEME_BTN + """
-  <div class="bellw"><button type="button" class="bell" id="bell" aria-label="Notifications"><i class="fas fa-bell"></i>{% set unread = notifs|selectattr('new')|list|length %}{% if unread %}<span class="cnt" id="ncnt">{{ unread }}</span>{% endif %}</button>
-   <div class="npanel" id="npanel"><div class="nph"><span>Notifications</span><button type="button" id="nclear"><i class="fas fa-trash-can"></i> Clear all</button></div>
-    <div class="nlist" id="nlist">{% for n in notifs %}<div class="ni"><span class="nic {{ n.cls }}"><i class="fas {{ n.icon }}"></i></span><div><b>{{ n.title }}</b><small>{{ n.sub }}</small></div><span class="nw">{{ n.when }}</span></div>{% else %}<div class="nempty"><i class="fas fa-bell-slash"></i><br>You are all caught up</div>{% endfor %}</div></div></div>
+  <div class="bellw"><button type="button" class="bell" id="bell" aria-label="Notifications" onclick="sw('notifications')"><i class="fas fa-bell"></i>{% set unread = notifs|selectattr('new')|list|length %}{% if unread %}<span class="cnt" id="ncnt">{{ unread }}</span>{% endif %}</button></div>
   <a href="#profile" class="user-badge" onclick="sw('profile');return false">{% if avatar %}<img class="av" src="{{ avatar }}" alt="">{% else %}<i class="fas fa-user-circle"></i>{% endif %} <span class="un">{{ session.fullname }}</span></a>
   <button type="button" class="dmb" id="dopen" aria-label="Open menu"><i class="fas fa-bars"></i></button></div>
 </header>
@@ -1472,6 +1491,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <a href="#book" data-go="book"><i class="fas fa-calendar-plus"></i><span>Book Appointment</span></a>
   <a href="#my-appointments" data-go="my-appointments"><i class="fas fa-calendar-check"></i><span>My Appointments</span></a>
   <a href="#profile" data-go="profile"><i class="fas fa-user"></i><span>My Profile</span></a>
+  <a href="#notifications" data-go="notifications"><i class="fas fa-bell"></i><span>Notifications</span></a>
   <a href="#help" data-go="help"><i class="fas fa-circle-question"></i><span>Help</span></a>
   <a href="#about" data-go="about"><i class="fas fa-building-columns"></i><span>About Us</span></a>
   <a href="#faqs" data-go="faqs"><i class="fas fa-comments"></i><span>FAQs</span></a>
@@ -1557,6 +1577,19 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   {% if history %}<h3 class="sub">Completed Transactions</h3>
   <div class="card tw"><table class="rt"><tr class="hr"><th>#</th><th>Document</th><th>Scheduled</th><th>Completed On</th></tr>
    {% for a in history %}<tr><td data-label="#">{{ loop.index }}</td><td data-label="Document">{{ a.document }}</td><td data-label="Scheduled">{{ a.sched_label }} · {{ a.sched_time }}</td><td data-label="Completed On"><span class="bdg done">{{ a.completed_at }}</span></td></tr>{% endfor %}</table></div>{% endif %}</section>
+ <section id="notifications" class="section"><h2 class="t">Notifications</h2>
+  {% set unread = notifs|selectattr('new')|list|length %}
+  <div class="nbar">
+   <div class="nftabs"><button type="button" class="nft active" data-f="all">All <span class="pill">{{ notifs|length }}</span></button>
+    <button type="button" class="nft" data-f="new">Unread <span class="pill">{{ unread }}</span></button></div>
+   <button type="button" class="btn btn-sm btn-ghost" id="nclear"><i class="fas fa-trash-can"></i> Clear all</button></div>
+  <div id="nbig">
+   {% for n in notifs %}<a class="nrow {{ 'unread' if n.new }}" data-new="{{ 1 if n.new else 0 }}" href="#{{ n.go }}" onclick="sw('{{ n.go }}');return false">
+    <span class="nic {{ n.cls }}"><i class="fas {{ n.icon }}"></i></span>
+    <div class="nbody"><b>{{ n.title }}</b><p>{{ n.sub }}</p><small><i class="fas fa-clock"></i> {{ n.when }}</small></div>
+    {% if n.new %}<span class="nnew">NEW</span>{% endif %}</a>
+   {% else %}<div class="card nempty"><i class="fas fa-bell-slash"></i><br>You are all caught up</div>{% endfor %}</div>
+  <div class="card empty" id="nnone" style="display:none">No unread notifications.</div></section>
  <section id="profile" class="section"><h2 class="t">My Profile</h2>
   <div class="card"><h3 class="ct">Profile Information</h3><form method="POST" action="/profile" enctype="multipart/form-data">
    <div class="av-row">
@@ -1749,7 +1782,9 @@ function sw(id){if(!document.getElementById(id))id='home';
  mb.classList.toggle('active',!!dd.querySelector('a[href="#'+id+'"]'));
  secs.forEach(s=>s.classList.toggle('active',s.id===id));dd.classList.remove('open');document.querySelectorAll('#dnav a[data-go]').forEach(l=>l.classList.toggle('active',l.dataset.go===id));
  document.querySelectorAll('.msg').forEach(m=>m.remove());
- history.replaceState(null,'','#'+id);window.scrollTo(0,0)}
+ history.replaceState(null,'','#'+id);
+ if(id==='notifications')markRead();
+ window.scrollTo(0,0)}
 links.forEach(l=>l.addEventListener('click',e=>{e.preventDefault();sw(l.getAttribute('href').slice(1))}));
 mb.addEventListener('click',e=>{e.stopPropagation();dd.classList.toggle('open')});
 document.addEventListener('click',()=>dd.classList.remove('open'));
@@ -1794,7 +1829,7 @@ document.getElementById('cropOk').addEventListener('click',()=>{
   out.textContent=[v('first_name'),m,v('last_name')].filter(Boolean).join(' ')};
  ['first_name','middle_name','last_name'].forEach(n=>f.elements[n].addEventListener('input',up))})();
 
-/* ---- mobile drawer menu (right side) + dark mode inside it + notification bell ---- */
+/* ---- mobile drawer menu (right side) + dark mode inside it ---- */
 function dOpen(o){document.body.classList.toggle('dopen',o)}
 document.getElementById('dopen').addEventListener('click',()=>dOpen(true));
 document.getElementById('dov').addEventListener('click',()=>dOpen(false));
@@ -1804,14 +1839,19 @@ const dtm=document.getElementById('dtheme');
 if(dtm){const pt=()=>{const d=document.documentElement.dataset.theme==='dark';
   dtm.innerHTML=d?'<i class="fas fa-sun"></i><span>Light Mode</span>':'<i class="fas fa-moon"></i><span>Dark Mode</span>'};
  dtm.addEventListener('click',e=>{e.preventDefault();document.getElementById('themeBtn').click();pt()});pt()}
-const bl=document.getElementById('bell'),bp=document.getElementById('npanel');
-bl.addEventListener('click',e=>{e.stopPropagation();bp.classList.toggle('open');
- const c=document.getElementById('ncnt');if(c){c.remove();fetch('/notifications/read',{method:'POST'}).catch(()=>{})}});
-document.addEventListener('click',e=>{if(!e.target.closest('.bellw'))bp.classList.remove('open')});
+
+/* ---- notifications page ---- */
+function markRead(){const c=document.getElementById('ncnt');if(c){c.remove();fetch('/notifications/read',{method:'POST'}).catch(()=>{})}}
+document.querySelectorAll('.nft').forEach(b=>b.addEventListener('click',()=>{
+ document.querySelectorAll('.nft').forEach(x=>x.classList.toggle('active',x===b));
+ let n=0;document.querySelectorAll('#nbig .nrow').forEach(r=>{const s=b.dataset.f==='all'||r.dataset.new==='1';r.style.display=s?'':'none';if(s)n++});
+ document.getElementById('nnone').style.display=n?'none':'block'}));
 document.getElementById('nclear').addEventListener('click',()=>{
  fetch('/notifications/clear',{method:'POST'}).then(()=>{
-  document.getElementById('nlist').innerHTML='<div class="nempty"><i class="fas fa-bell-slash"></i><br>You are all caught up</div>';
+  document.getElementById('nbig').innerHTML='<div class="card nempty"><i class="fas fa-bell-slash"></i><br>You are all caught up</div>';
+  document.getElementById('nnone').style.display='none';
   const c=document.getElementById('ncnt');if(c)c.remove()}).catch(()=>{})});
+
 /* ---- survey: "I do not know what a CC is" answers CC2 and CC3 with N/A ---- */
 document.querySelectorAll('input[name="cc1"]').forEach(r=>r.addEventListener('change',()=>{
  if(r.value==='4'&&r.checked){const a=document.querySelector('input[name="cc2"][value="5"]'),b=document.querySelector('input[name="cc3"][value="4"]');if(a)a.checked=true;if(b)b.checked=true}}));
@@ -1976,6 +2016,7 @@ form.in{display:inline}
  </header>
  <div class="content">
  {% for cat, m in get_flashed_messages(with_categories=true) %}<div class="msg {{ cat }}">{{ m }}</div>{% endfor %}
+ {% if not mail_on %}<div class="alert danger"><i class="fas fa-envelope-circle-check"></i><div><strong>Email is not set up.</strong><br>Students will not receive activation emails. Set <code>SMTP_USER</code> and <code>SMTP_PASS</code> (Gmail App Password), restart the server, then press <strong>Send test email</strong>.</div></div>{% elif mail_err %}<div class="alert danger"><i class="fas fa-triangle-exclamation"></i><div>The last email failed: {{ mail_err }}</div></div>{% endif %}
 
  <div class="tab-content active" id="overview">
   <div class="pn"><h3>Admin Dashboard</h3>
@@ -2555,7 +2596,7 @@ def admin_dashboard():
                   missed_count=len(missed), active_groups=group_cy(active), archive_groups=group_cy(archive),
                   missed_groups=group_cy(missed), approved_groups=group_cy(people), restricted=restricted,
                   recent=recent, profiles=profiles, chart=chart, donut=donut, activity=activity,
-                  feedback=feedback_db[::-1])
+                  feedback=feedback_db[::-1], mail_on=mail_ready(), mail_err=MAIL_STATE['last_error'])
 
 
 def find_appt(aid):
@@ -2705,8 +2746,11 @@ def approve():
     if e in pending_accounts:
         approved_users[e] = pending_accounts.pop(e)
         approved_users[e]['approved_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        mail_account_result(e, approved_users[e], True)
-        flash(f"Approved {e}" + ("" if mail_ready() else " (no email sent: e-mail is not set up yet)"), 'ok')
+        sent, err = mail_account_result(e, approved_users[e], True)
+        if sent:
+            flash(f"✅ Approved {e}. Activation email sent.", 'ok')
+        else:
+            flash(f"Approved {e}, but the email was NOT sent: {err}", 'error')
     return redirect('/admin#accounts')
 
 
@@ -2715,9 +2759,10 @@ def reject():
     e = request.form.get('email', '').strip().lower()
     rej = pending_accounts.pop(e, None)
     if rej:
-        mail_account_result(e, rej, False)
         rejected_accounts.add(e)
-        flash(f"Rejected {e}" + ("" if mail_ready() else " (no email sent: e-mail is not set up yet)"), 'ok')
+        sent, err = mail_account_result(e, rej, False)
+        flash(f"Rejected {e}. " + ("Email sent." if sent else f"The email was NOT sent: {err}"),
+              'ok' if sent else 'error')
     return redirect('/admin#accounts')
 
 
@@ -2807,7 +2852,7 @@ def forgot_new():
 
 @app.route('/notifications/read', methods=['POST'])
 def read_notifications():
-    """Opening the bell marks everything as read, so the red number disappears (and stays gone)."""
+    """Opening the notifications page marks everything as read, so the red number disappears (and stays gone)."""
     me = approved_users.get(session['email'])
     if me is not None:
         me['notif_read'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
