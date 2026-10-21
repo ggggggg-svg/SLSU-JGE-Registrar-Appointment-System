@@ -227,17 +227,22 @@ UNIV = dict(
     ],
 )
 
-# About Us content - DRAFT text, please replace with the office's official statements.
+# About Us content - Vision, Mission and Goals of SLSU (shown on the About Us page).
 ABOUT = dict(
-    mission=("To provide accurate, secure and timely management of student academic records, and to deliver "
-             "courteous, efficient and transparent registrar services to students, alumni and the university community."),
-    vision=("A trusted, technology-driven Office of the Registrar that sets the standard for dependable records "
-            "management and student-centered service at SLSU – JGE Tagkawayan Campus."),
-    goals=["Safeguard the integrity, confidentiality and accuracy of official student records.",
-           "Process document requests quickly and transparently, with minimal waiting time.",
-           "Offer accessible online services such as appointment scheduling and request tracking.",
-           "Comply with university policies and the Data Privacy Act of 2012 (RA 10173).",
-           "Keep improving registrar services through student feedback."],
+    vision=("Southern Luzon State University as an excellent academic hub of excellent curricular programs, "
+            "transdisciplinary researches, and responsive extension services that contributes to knowledge "
+            "production, social development, and economic advancement of Quezon Province and the CALABARZON Region."),
+    mission=("The university commits to develop a sustained culture of delivering quality service and undertaking "
+             "continuous innovations in instruction, research and extension in the field of agriculture, science, "
+             "education, engineering, technology, allied health medicine, human security, business and the arts "
+             "anchored to the development needs of Quezon Province and the CALABARZON Region and national and "
+             "global development goals."),
+    goals=["Produce quality graduates in BS Education, BS Fisheries, and BS Industrial Technology major in "
+           "Computer, Electronics, and Electrical Technology.",
+           "Develop an ideal Aquaculture and Coastal Resource Management Research and Training Center.",
+           "Maintain a close linkage with the main campus and external linkages with NGO's, NGA's and LGU's and "
+           "other academic institutions for sharing of technical expertise and financial resources and for "
+           "placement of graduates."],
     history=["Southern Luzon State University – JGE Tagkawayan Campus is one of the campuses of Southern Luzon "
              "State University in the province of Quezon. As the campus grew, so did the need for one office to keep "
              "and issue official academic records, from enrollment and grades to transcripts and diplomas. That office "
@@ -493,6 +498,13 @@ def account_activated():
     return bool(pe and pe in approved_users)
 
 
+def account_waiting():
+    """True while this browser registered an account that is still waiting for the admin's approval.
+    The login page then reminds the student to try again later."""
+    pe = session.get('pending_email')
+    return bool(pe and pe in pending_accounts)
+
+
 def render(tpl, **kw):
     return render_template_string(tpl, css=CSS, logo=LOGO_URL, bg=BACKGROUND_URL, banner=BANNER_URL,
                                   about_banner=ABOUT_BANNER_URL, about=ABOUT, univ=UNIV, quality=QUALITY,
@@ -501,7 +513,8 @@ def render(tpl, **kw):
                                   cphone=CONTACT_PHONE, flash_ms=FLASH_MS, courses=COURSES, years=YEARS,
                                   payments=PAYMENTS, times=TIMES, docs=DOCS, services=SERVICES, grades=GRADES, lhs=LHS,
                                   reqs=REQUIREMENTS, doc_reqs=DOC_REQUIREMENTS, map_q=quote_plus(MAP_QUERY), csm_sqd=CSM_SQD,
-                                  today=date.today().isoformat(), activated=account_activated(), **kw)
+                                  today=date.today().isoformat(), activated=account_activated(),
+                                  waiting=account_waiting(), **kw)
 
 
 # ========== PERMANENT DATABASE (SQLAlchemy) ==========
@@ -636,7 +649,9 @@ def persist():
 init_db()
 
 
-# ========== E-MAIL (reset codes, approval / rejection notices) ==========
+# ========== E-MAIL (only used for the forgot-password code) ==========
+# Students are NOT e-mailed when their account is approved or rejected: they see the result on the login page.
+# E-mail is only needed so the "Forgot password?" 6-digit code can be sent.
 # HOW TO TURN ON E-MAIL (Gmail):
 #   1. Google Account > Security > turn on 2-Step Verification.
 #   2. Google Account > Security > App passwords > create one (16 letters, spaces are OK).
@@ -645,7 +660,7 @@ init_db()
 #        PowerShell  :  $env:SMTP_USER="yourname@gmail.com";  $env:SMTP_PASS="abcd efgh ijkl mnop"
 #        Linux / Mac :  export SMTP_USER=yourname@gmail.com   export SMTP_PASS="abcd efgh ijkl mnop"
 #   SMTP_HOST / SMTP_PORT are optional: they default to smtp.gmail.com : 587 (465 is tried automatically as a backup).
-#   SITE_URL = public address of this site (e.g. https://registrar.example.com) so links in e-mails open correctly.
+#   SITE_URL = public address of this site (e.g. https://registrar.example.com).
 # Without SMTP settings the e-mail text (including the reset code) is printed in the terminal instead.
 SMTP_USER = (os.environ.get('SMTP_USER') or '').strip()                       # you can type it here: 'yourname@gmail.com'
 SMTP_PASS = re.sub(r'\s+', '', os.environ.get('SMTP_PASS') or '')             # app password; spaces are removed
@@ -725,26 +740,6 @@ def send_mail(to, subject, text, html_body):
     return True
 
 
-def mail_account_result(email, u, ok):
-    """Send the approval / rejection e-mail now. Returns (sent, error_message)."""
-    name = escape(u.get('fn') or u.get('fullname') or 'Student')
-    if ok:
-        link = site_url() + '/login'
-        subject = 'Your Registrar Appointment account is activated'
-        lines = [f"Hi {name},",
-                 "Good news! The Registrar's Office has <strong>approved and activated</strong> your account.",
-                 "You can now log in with your Gmail address or Student ID and book your document appointment."]
-        text = f"Hi {name}, your account is activated. Log in here: {link}"
-        return send_mail_now(email, subject, text, mail_html('Account activated', lines, ('Log In Now', link)))
-    link = site_url() + '/register'
-    subject = 'Update on your Registrar Appointment registration'
-    lines = [f"Hi {name},", "We are sorry, but your registration was <strong>not approved</strong>.",
-             "Please check that your details match your school records, then register again, "
-             "or visit the Registrar's Office for help."]
-    text = f"Hi {name}, your registration was not approved. You may register again: {link}"
-    return send_mail_now(email, subject, text, mail_html('Registration not approved', lines, ('Register Again', link)))
-
-
 # ========== FORGOT PASSWORD (6-digit code sent by e-mail) ==========
 RESET_CODES = {}                       # email -> dict(h=hash, exp=timestamp, tries=int, sent=timestamp)
 CODE_TTL, CODE_TRIES, CODE_COOLDOWN = 600, 5, 60     # valid 10 min, 5 attempts, 60 s between e-mails
@@ -818,8 +813,7 @@ def build_notifs(email, me):
     ev = []
     if me.get('approved_at'):
         ev.append((me['approved_at'], 'fa-circle-check', 'c3', 'Account activated',
-                   'Your account was approved by the Registrar. A confirmation email was sent to your Gmail. '
-                   'You can now book your appointments.', 'book'))
+                   'Your account was approved by the Registrar. You can now book your appointments.', 'book'))
     for a in appointments_db.get(email, []):
         if a['status'] == 'Pending':
             ev.append((a['submitted_at'], 'fa-calendar-plus', 'c1', 'Appointment booked',
@@ -1277,6 +1271,14 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 .nbody small{display:block;margin-top:.35rem;color:var(--mut);font-size:.78rem}
 .nnew{background:#d93025;color:#fff;font-size:.66rem;font-weight:700;padding:.15rem .55rem;border-radius:2rem;flex:none}
 
+/* ========== VISION / MISSION / GOALS (About Us) ========== */
+.vmg{text-align:center}
+.vmg-h{background:var(--pri);color:#fff;text-align:center;font-weight:500;font-size:1.55rem;line-height:1.3;padding:.15rem .6rem;margin:0 0 1.3rem;letter-spacing:.3px}
+.vmg p{color:var(--tx);line-height:1.85;font-size:.96rem}
+.vmg-goals{max-width:660px;margin:0 auto 1.4rem}
+.vmg-goals ol{text-align:left;padding-left:1.6rem}
+.vmg-goals li{color:var(--tx);line-height:1.85;font-size:.96rem;margin-bottom:.1rem}
+
 /* ========== QUALITY POLICY PAGE ========== */
 .qp-head{text-align:center;margin-bottom:1.4rem}
 .qp-head .logo-circle{width:84px;height:84px;margin:0 auto .8rem}
@@ -1375,6 +1377,12 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
 .actv i{font-size:1.4rem;color:#2e9d68;margin-top:.1rem}
 .actv b{display:block;font-size:.98rem;margin-bottom:.1rem}
 
+/* ---- "Waiting for activation - try again later" reminder ---- */
+.rmd{display:flex;gap:.8rem;align-items:flex-start;margin-top:1rem;padding:.9rem 1rem;border-radius:12px;
+ background:#fff7e0;color:#7a5a00;border:1px solid #e3b43a;border-left:5px solid #e0a100;font-size:.9rem;line-height:1.5;text-align:left}
+.rmd i{font-size:1.4rem;color:#e0a100;margin-top:.1rem}
+.rmd b{display:block;font-size:.98rem;margin-bottom:.1rem}
+
 .iw{position:relative}.iw input{padding-right:4.2rem}
 .tpw{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:#5d6a62;cursor:pointer;
  font-size:.84rem;font-weight:500;height:40px;padding:0 .7rem}
@@ -1416,6 +1424,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
  <div class="lh">""" + LOGO_HTML + """<h1>SLSU JGE - Office of the Registrar</h1><p>JGE Tagkawayan Campus · Registrar Appointment System</p></div>
  {% for cat, m in get_flashed_messages(with_categories=true) %}<div class="msg {{ cat }}" style="margin-top:1rem">{{ m }}</div>{% endfor %}
  {% if page == 'login' and activated %}<div class="actv" id="actv"><i class="fas fa-circle-check"></i><div><b>Your account has been activated</b>The Registrar's Office approved your account. You can now log in below.</div></div>{% endif %}
+ {% if page == 'login' and waiting %}<div class="rmd" id="rmdw"><i class="fas fa-clock-rotate-left"></i><div><b>Your account is waiting for activation</b>The Registrar's Office has not approved it yet. Please try again later.</div></div>{% endif %}
 
  {% if page == 'login' %}
   <form method="POST" action="/login" class="lform">
@@ -1499,14 +1508,15 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
     <li><span>Select your <b>program and year level</b> (or <b>grade level and section</b> for Laboratory High School), your gender and birthday.</span></li>
     <li><span>Enter a valid <b>Gmail address</b> and a strong password: 8+ characters with an uppercase letter, a number and a symbol.</span></li>
     <li><span>Press <b>Submit for Activation</b>.</span></li>
-    <li><span><b>Wait for approval.</b> Keep the page open: it tells you when the administrator approves your account. You will also get an <b>email</b> telling you whether your account was approved or rejected.</span></li>
-    <li><span>Go to <b>Log In</b> and use your Email or Student ID and password. Then open <b>Book Appointment</b> to request your document.</span></li></ol>
+    <li><span><b>Wait for approval.</b> Keep the page open: it tells you when the administrator approves your account. If it takes long, close it and <b>try again later</b> on the Log In page.</span></li>
+    <li><span>When your account is activated, go to <b>Log In</b> and use your Email or Student ID and password. Then open <b>Book Appointment</b> to request your document.</span></li></ol>
    <p class="tip"><i class="fas fa-lightbulb"></i> Use your real details exactly as in your school records. Wrong information can delay approval.</p></details>
 
  {% else %}
   <div style="text-align:center;padding:1.4rem 0 .6rem"><i class="fas fa-clock" id="pic" style="font-size:3rem;color:#003d1f"></i>
    <h2 id="ptt" style="margin:1rem 0;font-size:1.25rem;color:#003d1f">Awaiting Activation</h2></div>
-  <p id="ptx" style="text-align:center;line-height:1.6;color:#1b2620">Your account has been submitted. Please wait for the administrator to approve it. Keep this page open and we will notify you here as soon as it is approved. We will also send an email to your Gmail address once your account is approved or rejected.</p>
+  <p id="ptx" style="text-align:center;line-height:1.6;color:#1b2620">Your account has been submitted. Please wait for the administrator to approve it. Keep this page open and we will notify you here as soon as it is approved.</p>
+  <div class="rmd" id="prm"><i class="fas fa-clock-rotate-left"></i><div><b>Reminder</b>Approval may take some time. If your account is not activated yet, please try again later.</div></div>
   <div class="center" id="pgo"><a class="lk" href="/login">← Back to Log In</a></div>
  {% endif %}
 
@@ -1544,10 +1554,11 @@ document.querySelectorAll('.msg').forEach(m=>{if(m.id==='fp')return;m.style.curs
  setTimeout(()=>{m.style.opacity=0;setTimeout(()=>m.remove(),350)},{{ flash_ms }}+2500);m.addEventListener('click',()=>m.remove())});
 </script>
 {% if page == 'pending' %}<script>
-(function(){const ic=document.getElementById('pic'),tt=document.getElementById('ptt'),tx=document.getElementById('ptx'),go=document.getElementById('pgo');
+(function(){const ic=document.getElementById('pic'),tt=document.getElementById('ptt'),tx=document.getElementById('ptx'),go=document.getElementById('pgo'),rm=document.getElementById('prm');
  function show(ok){ic.className=ok?'fas fa-check-circle':'fas fa-times-circle';
   tt.textContent=ok?'Account Approved!':'Registration Not Approved';
   tx.textContent=ok?'Good news! The administrator has approved your account. You can now log in and book your appointments.':'Sorry, your registration was not approved. Please visit the Registrars Office, or register again with the correct details.';
+  if(rm)rm.style.display='none';
   go.innerHTML=ok?'<a class="btn btn-full" style="color:#fff" href="/login">Log In Now</a>':'<a class="lk" href="/register">Register again</a>'}
  function chk(){fetch('/register/status',{cache:'no-store'}).then(r=>r.json()).then(d=>{
   if(d.status==='approved'){show(true);clearInterval(t)}else if(d.status==='rejected'){show(false);clearInterval(t)}}).catch(()=>{})}
@@ -1744,7 +1755,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <div class="stp"><div class="n">7</div><div><h4>Submit the appointment</h4><p>Press <strong>Submit Appointment</strong>. You will find it under <strong>My Appointments</strong> as <span class="bdg pend">Pending</span>, and you will get a notification on the bell.</p></div></div>
    <div class="stp"><div class="n">8</div><div><h4>Visit the office and claim</h4><p>Come on your scheduled date and time with your requirements and valid ID. If someone claims for you, bring an authorization letter, a copy of your ID and the representative's valid ID.</p><p class="hint">Office days: {{ cdays }}</p></div></div></div>
   <div class="card prose"><h3 class="ct"><i class="fas fa-circle-question"></i> Common problems</h3>
-   <details><summary>I cannot sign in.</summary><p>Use the Gmail or Student ID you registered with. If you registered recently, your account may still be waiting for approval. Forgot your password? Press <strong>Forgot password?</strong> on the sign-in page and we will email you a 6-digit code to reset it.</p></details>
+   <details><summary>I cannot sign in.</summary><p>Use the Gmail or Student ID you registered with. If you registered recently, your account may still be waiting for approval, so please try again later. Forgot your password? Press <strong>Forgot password?</strong> on the sign-in page and we will email you a 6-digit code to reset it.</p></details>
    <details><summary>The date I want is not accepted.</summary><p>Appointments must be on a future weekday (Monday to Friday). Weekends and today cannot be booked.</p></details>
    <details><summary>My time slot is full.</summary><p>Each time slot has limited capacity. Pick another time or another date.</p></details>
    <details><summary>The system will not let me submit.</summary><p>Check that every required field is filled, your mobile number is valid (09XXXXXXXXX) and the requirements confirmation is ticked.</p></details>
@@ -1757,9 +1768,9 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <div class="banner"><img src="{{ about_banner }}" alt="" data-fb="{{ banner }}|{{ bg }}" onerror="fb(this)"></div>
   <div class="card prose"><p>The Office of the Registrar of Southern Luzon State University – JGE Tagkawayan Campus keeps and issues official student academic records. This appointment system was built to make requesting documents faster, more organized and less crowded for students and registrar staff alike.</p></div>
   <div class="g2">
-   <div class="card prose"><h3 class="ct"><i class="fas fa-bullseye"></i> Mission</h3><p>{{ about.mission }}</p></div>
-   <div class="card prose"><h3 class="ct"><i class="fas fa-eye"></i> Vision</h3><p>{{ about.vision }}</p></div></div>
-  <div class="card prose"><h3 class="ct"><i class="fas fa-flag-checkered"></i> Goals</h3><ul>{% for g in about.goals %}<li>{{ g }}</li>{% endfor %}</ul></div>
+   <div class="card vmg"><h3 class="vmg-h">Vision</h3><p>{{ about.vision }}</p></div>
+   <div class="card vmg"><h3 class="vmg-h">Mission</h3><p>{{ about.mission }}</p></div></div>
+  <div class="card vmg vmg-goals"><h3 class="vmg-h">Goals</h3><ol>{% for g in about.goals %}<li>{{ g }}</li>{% endfor %}</ol></div>
   <div class="card prose"><h3 class="ct"><i class="fas fa-landmark"></i> Our History</h3>{% for p in about.history %}<p>{{ p }}</p>{% endfor %}</div>
   <div class="card prose mapbox"><h3 class="ct"><i class="fas fa-location-dot"></i> Where to find us</h3>
    <p>{{ caddr }} · Southern Luzon State University – JGE Tagkawayan Campus</p>
@@ -1777,7 +1788,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <div class="qp-sign"><div><b>{{ quality.signer }}</b><span>{{ quality.signer_title }}</span></div>
     <div class="qp-rev"><b style="font-size:.88rem">{{ quality.revision }}</b>{{ quality.effective }}</div></div></div></section>
  <section id="faqs" class="section"><h2 class="t">Frequently Asked Questions</h2><div class="card">
-  <details><summary>Why can't I log in right after registering?</summary><p>New accounts must be approved by the administrator first. You can sign in once your account is activated.</p></details>
+  <details><summary>Why can't I log in right after registering?</summary><p>New accounts must be approved by the administrator first. If your account is still pending, please try again later. You can sign in once your account is activated.</p></details>
   <details><summary>Can I book on weekends or for today?</summary><p>No. The office is closed on weekends, and appointments must be booked for a future weekday.</p></details>
   <details><summary>What if my preferred time slot is full?</summary><p>Each slot has a limited capacity. Choose another time or date.</p></details>
   <details><summary>Can someone claim my document for me?</summary><p>Yes, with an authorization letter, a copy of your ID and the representative's valid ID.</p></details>
@@ -1787,14 +1798,14 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <details><summary>Can Laboratory High School students use this portal?</summary><p>Yes. Choose <strong>Laboratory High School Student</strong> when you register and enter your grade level and section. Your requests are listed for the registrar by grade level and section.</p></details>
   <details><summary>I forgot my password.</summary><p>Press <strong>Forgot password?</strong> on the sign-in page, enter your Gmail or Student ID, and we will email a 6-digit code to your Gmail address. Enter the code, then choose a new password. The code works for 10 minutes.</p></details></div></section>
  <section id="terms" class="section"><h2 class="t">Terms of Use</h2><div class="card prose">
-  <p class="hint">Last updated: October 17, 2026</p>
+  <p class="hint">Last updated: October 21, 2026</p>
   <p>These Terms of Use govern your use of the SLSU JGE Tagkawayan Registrar Appointment System (the "System"), operated by the Office of the Registrar of Southern Luzon State University – JGE Tagkawayan Campus ("the Campus"). By creating an account or using the System you agree to these terms.</p>
   <h4>1. Who may use the System</h4><p>The System is for currently enrolled college students, Laboratory High School students, and alumni of the Campus. College students must be at least 16 years old and Laboratory High School students at least 11. Users who are minors should use the System with the knowledge and consent of a parent or guardian.</p>
-  <h4>2. Your account</h4><p>Registration must be approved by the Registrar's Office, and you will be told by email whether it was approved or rejected. Keep your password private and do not share your account. You are responsible for all activity under your account. Tell the Registrar's Office right away if you think someone else used it.</p>
+  <h4>2. Your account</h4><p>Registration must be approved by the Registrar's Office. Until then your account is pending and you should try again later on the Log In page, which shows when your account has been activated. Keep your password private and do not share your account. You are responsible for all activity under your account. Tell the Registrar's Office right away if you think someone else used it.</p>
   <h4>3. Accurate information</h4><p>Give true, complete and current information, exactly as in your school records. False or misleading information, or using another person's identity, may lead to rejection, suspension or removal of your account and may be reported to the proper university office.</p>
   <h4>4. Appointments and document requests</h4><p>A booking is a request for a schedule, not a guarantee that your document is ready or will be released. Appointments are available on weekdays only, on future dates, and each time slot has limited capacity. Request only your own records, or records you are authorized to request.</p>
   <h4>5. Requirements, fees and claiming</h4><p>Bring the complete requirements shown for your document and a valid ID. Fees are paid at the SLSU JGE Campus Cashier. Processing times and fees follow the Registrar's policies and the Citizen's Charter and may change without prior notice. A representative may claim a document only with an authorization letter, a copy of your ID and the representative's valid ID.</p>
-  <h4>6. Notifications and emails</h4><p>The System may send notices to your registered Gmail address, such as account approval or rejection and password reset codes, and shows reminders under the notification bell. Keep your email address correct and check your Spam folder.</p>
+  <h4>6. Notifications and emails</h4><p>The System shows reminders under the notification bell and may send password reset codes and password-change notices to your registered Gmail address. Keep your email address correct and check your Spam folder.</p>
   <h4>7. Acceptable use</h4><p>You agree not to: attempt to access other users' data or the admin area; upload harmful, unlawful or offensive content (including profile photos); interfere with, overload or try to break the System; submit false bookings or spam; or use automated tools to book appointments.</p>
   <h4>8. Feedback</h4><p>Feedback you send, including the Client Satisfaction Measurement form, may be used by the Campus to improve its services. Answering the form is optional.</p>
   <h4>9. Availability of the System</h4><p>We work to keep the System available, but we do not promise uninterrupted service. It may be unavailable during maintenance, power or internet interruptions, or events beyond our control. For urgent requests, visit the Registrar's Office during office days: {{ cdays }}</p>
@@ -1804,7 +1815,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <h4>13. Changes to these terms</h4><p>The Campus may update these terms from time to time. The date above shows the latest version. Continued use of the System after a change means you accept the updated terms.</p>
   <h4>14. Governing law and contact</h4><p>These terms are governed by the laws of the Republic of the Philippines. Questions? Contact the Registrar's Office at {{ cemail }} or see <a href="#contact" onclick="sw('contact')" style="color:var(--acc)">Contact Us</a>.</p></div></section>
  <section id="privacy" class="section"><h2 class="t">Privacy Policy</h2><div class="card prose">
-  <p class="hint">Last updated: October 17, 2026</p>
+  <p class="hint">Last updated: October 21, 2026</p>
   <p>The Office of the Registrar of Southern Luzon State University – JGE Tagkawayan Campus respects your privacy. This policy explains what personal information the Registrar Appointment System collects, why, and how it is protected, in line with the Data Privacy Act of 2012 (Republic Act No. 10173) and its Implementing Rules and Regulations.</p>
   <h4>1. Information we collect</h4><ul>
    <li><strong>Account details:</strong> last, first and middle name, Student ID, Gmail address, gender, birthday and age, and your password (stored only in scrambled, hashed form).</li>
@@ -1813,11 +1824,11 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <li><strong>Transaction details:</strong> the documents you request, comments, preferred schedule, payment method, and the status of each appointment.</li>
    <li><strong>Feedback:</strong> your answers to the Client Satisfaction Measurement form, including the optional suggestions and email address.</li>
    <li><strong>Technical data:</strong> a session cookie that keeps you signed in, and your theme preference (light or dark) saved on your device.</li></ul>
-  <h4>2. Why we collect it</h4><p>We use your information to verify your identity and approve your account; to schedule and process your document requests; to send you emails and notifications about your account and appointments; to help registrar staff prepare your documents; to answer your concerns; and to improve our services through feedback and anonymous statistics.</p>
+  <h4>2. Why we collect it</h4><p>We use your information to verify your identity and approve your account; to schedule and process your document requests; to send you notifications about your account and appointments and password reset codes; to help registrar staff prepare your documents; to answer your concerns; and to improve our services through feedback and anonymous statistics.</p>
   <h4>3. Legal basis</h4><p>We process your information because it is necessary to provide the registrar services you request, to carry out the Campus's functions as a state university, and, where needed, with your consent, which you give when you register and use the System.</p>
   <h4>4. Who can see your information</h4><p>Only authorized Registrar's Office personnel and system administrators. We do not sell, rent or trade your information. We disclose it to other parties only when required by law or by a government agency with authority, such as CHED, or when you ask us to send a document to a third party (for example for authentication).</p>
   <h4>5. Storage, security and retention</h4><p>Records are kept in a secured database managed by the Campus. We use reasonable organizational, physical and technical safeguards, including hashed passwords, restricted admin access and limited login sessions. We keep your information while your account is active and as long as needed for school records and legal requirements, after which it is deleted or anonymized. No system is completely secure, so please protect your password.</p>
-  <h4>6. Emails</h4><p>We email you only about your account and requests: approval or rejection of your registration, password reset codes and similar notices. We do not send advertising.</p>
+  <h4>6. Emails</h4><p>We email you only for password resets: the 6-digit reset code and a notice when your password is changed. We do not send advertising.</p>
   <h4>7. Your rights as a data subject</h4><p>You have the right to be informed; to access and get a copy of your personal data; to correct inaccurate data (you can update most details in My Profile); to object to or withdraw consent to processing; to request blocking, removal or destruction of your data when it is no longer needed or was unlawfully obtained; to data portability; to be indemnified for damages caused by inaccurate or unlawfully used data; and to file a complaint with the National Privacy Commission (privacy.gov.ph).</p>
   <h4>8. Minors</h4><p>Laboratory High School students may be under 18. Their parents or guardians may contact the Registrar's Office to review, correct or delete their child's information.</p>
   <h4>9. Cookies</h4><p>We use only the cookies needed to keep you signed in and to remember your display preference. We do not use advertising or tracking cookies. The Google Map on the About Us page is provided by Google and is subject to Google's own privacy policy.</p>
@@ -2119,7 +2130,7 @@ form.in{display:inline}
  </header>
  <div class="content">
  {% for cat, m in get_flashed_messages(with_categories=true) %}<div class="msg {{ cat }}">{{ m }}</div>{% endfor %}
- {% if not mail_on %}<div class="alert danger"><i class="fas fa-envelope-circle-check"></i><div><strong>Email is not set up.</strong><br>Students will not receive activation emails. Set <code>SMTP_USER</code> and <code>SMTP_PASS</code> (Gmail App Password), then restart the server.</div></div>{% elif mail_err %}<div class="alert danger"><i class="fas fa-triangle-exclamation"></i><div>The last email failed: {{ mail_err }}</div></div>{% endif %}
+ {% if not mail_on %}<div class="alert danger"><i class="fas fa-envelope-circle-check"></i><div><strong>Email is not set up.</strong><br>Students cannot receive the 6-digit code for <em>Forgot password</em>. Set <code>SMTP_USER</code> and <code>SMTP_PASS</code> (Gmail App Password), then restart the server. Account approval and rejection do not use email.</div></div>{% elif mail_err %}<div class="alert danger"><i class="fas fa-triangle-exclamation"></i><div>The last email failed: {{ mail_err }}</div></div>{% endif %}
 
  <div class="tab-content active" id="overview">
   <div class="pn"><h3>Admin Dashboard</h3>
@@ -2329,7 +2340,8 @@ def too_large(e):
 def notify_registration_result():
     """If this browser registered earlier and was rejected, tell the student once.
     (An approved account is NOT flashed here: the login page shows a persistent
-    'Your account has been activated' reminder until the student logs in.)"""
+    'Your account has been activated' reminder until the student logs in. A pending account
+    shows a persistent 'try again later' reminder.)"""
     pe = session.get('pending_email')
     if pe in rejected_accounts:
         session.pop('pending_email', None)
@@ -2379,7 +2391,7 @@ def login():
 
     for pe, u in pending_accounts.items():
         if key in (pe, u['studentid'].strip().lower()) and check_password_hash(u['password'], pw):
-            flash("⏳ Your account is awaiting administrator approval.", 'error')
+            flash("⏳ Your account is still waiting for the administrator's approval. Please try again later.", 'error')
             return render(LOGIN_TPL, page='login')
     flash("Invalid credentials or account not activated.", 'error')
     return render(LOGIN_TPL, page='login')
@@ -2833,27 +2845,23 @@ def admin_update_student():
 
 @app.route('/admin/approve', methods=['POST'])
 def approve():
+    """Approve a pending account. No email is sent: the student sees the result on the Log In page."""
     e = request.form.get('email', '').strip().lower()
     if e in pending_accounts:
         approved_users[e] = pending_accounts.pop(e)
         approved_users[e]['approved_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        sent, err = mail_account_result(e, approved_users[e], True)
-        if sent:
-            flash(f"✅ Approved {e}. Activation email sent.", 'ok')
-        else:
-            flash(f"Approved {e}, but the email was NOT sent: {err}", 'error')
+        flash(f"✅ Approved {e}. The student will see the activation notice on the Log In page.", 'ok')
     return redirect('/admin#accounts')
 
 
 @app.route('/admin/reject', methods=['POST'])
 def reject():
+    """Reject a pending account. No email is sent."""
     e = request.form.get('email', '').strip().lower()
     rej = pending_accounts.pop(e, None)
     if rej:
         rejected_accounts.add(e)
-        sent, err = mail_account_result(e, rej, False)
-        flash(f"Rejected {e}. " + ("Email sent." if sent else f"The email was NOT sent: {err}"),
-              'ok' if sent else 'error')
+        flash(f"Rejected {e}.", 'ok')
     return redirect('/admin#accounts')
 
 
@@ -2977,8 +2985,8 @@ if __name__ == '__main__':
     print("SLSU JGE TAGKAWAYAN — Registrar Appointment System")
     print(f"Admin login: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
     if mail_ready():
-        print(f"[MAIL] ready: {SMTP_USER} via {SMTP_HOST}:{SMTP_PORT}")
+        print(f"[MAIL] ready: {SMTP_USER} via {SMTP_HOST}:{SMTP_PORT}  (used only for forgot-password codes)")
     else:
-        print("[MAIL] NOT set up: set SMTP_USER and SMTP_PASS (Gmail App Password). Codes are printed here until then.")
+        print("[MAIL] NOT set up: set SMTP_USER and SMTP_PASS (Gmail App Password). Reset codes are printed here until then.")
     print("Running at http://127.0.0.1:5000  (logo: static/JGE_LOGO.png)")
     app.run(debug=os.environ.get('FLASK_DEBUG') == '1', port=5000)
