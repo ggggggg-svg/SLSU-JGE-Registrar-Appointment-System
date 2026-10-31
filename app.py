@@ -35,6 +35,15 @@ os.makedirs(AVATAR_DIR, exist_ok=True)
 FLASH_MS = 2500                        # notifications disappear after this many milliseconds
 ADMIN_EMAIL = 'admin@slsu.edu.ph'
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')   # change in production
+# Order of Payment account: sees ONLY the Order of Payment interface (the admin can open it too)
+OP_EMAIL = 'orderpay@slsu.edu.ph'
+OP_PASSWORD = os.environ.get('OP_PASSWORD', 'order123')         # change in production
+# Default values of the Order of Payment form (all of them can be edited on the page)
+OP_DEFAULTS = dict(entity='SLSU JGE', fund='OBF', addr='TAGKAWAYAN, QUEZON', bank='LBP',
+                   acct='2442-1064-12', signer='SHERRLYN U. MAGDAME, CPA')
+# Optional: fee per document, filled in automatically when you pick an appointment on the Order of Payment page.
+# Example:  DOC_FEES = {"Certificate of Academic Standing": 100}
+DOC_FEES = {}
 SLOT_CAPACITY = 50                      # max bookings per date + time slot
 COURSES = [
     "BS Industrial Technology major in Computer Technology",
@@ -227,22 +236,20 @@ UNIV = dict(
     ],
 )
 
-# About Us content - Vision, Mission and Goals of SLSU (shown on the About Us page).
+# About Us content - Vision, Mission and Core Values of SLSU (from the #YES4SLSU board).
 ABOUT = dict(
-    vision=("Southern Luzon State University as an excellent academic hub of excellent curricular programs, "
-            "transdisciplinary researches, and responsive extension services that contributes to knowledge "
-            "production, social development, and economic advancement of Quezon Province and the CALABARZON Region."),
-    mission=("The university commits to develop a sustained culture of delivering quality service and undertaking "
-             "continuous innovations in instruction, research and extension in the field of agriculture, science, "
-             "education, engineering, technology, allied health medicine, human security, business and the arts "
-             "anchored to the development needs of Quezon Province and the CALABARZON Region and national and "
-             "global development goals."),
-    goals=["Produce quality graduates in BS Education, BS Fisheries, and BS Industrial Technology major in "
-           "Computer, Electronics, and Electrical Technology.",
-           "Develop an ideal Aquaculture and Coastal Resource Management Research and Training Center.",
-           "Maintain a close linkage with the main campus and external linkages with NGO's, NGA's and LGU's and "
-           "other academic institutions for sharing of technical expertise and financial resources and for "
-           "placement of graduates."],
+    vision=("A globally recognized university known for academic excellence, innovative and responsive research "
+            "and extension services for national and global development."),
+    mission=("SLSU shall provide global education that nurtures competent professionals who are morally grounded "
+             "and responsive to community needs. The university is also committed to conduct research and "
+             "extension across various fields while innovatively utilizing and regenerating its resources through "
+             "sustainable environmental approaches."),
+    values=[("GO", "God-loving"),
+            ("S", "Service-Oriented"),
+            ("L", "Leadership by Example"),
+            ("S", "Sustained Passion for Excellence"),
+            ("U", "Undiminished Commitment to Peace and Environmental Advocacy")],
+    tagline="Empowering people, ensuring a sustainable future",
     history=["Southern Luzon State University – JGE Tagkawayan Campus is one of the campuses of Southern Luzon "
              "State University in the province of Quezon. As the campus grew, so did the need for one office to keep "
              "and issue official academic records, from enrollment and grades to transcripts and diplomas. That office "
@@ -503,6 +510,15 @@ def account_waiting():
     The login page then reminds the student to try again later."""
     pe = session.get('pending_email')
     return bool(pe and pe in pending_accounts)
+
+
+def home_for(email):
+    """Where each kind of account lands after logging in."""
+    if email == ADMIN_EMAIL:
+        return '/admin'
+    if email == OP_EMAIL:
+        return '/orderpay'
+    return '/dashboard'
 
 
 def render(tpl, **kw):
@@ -870,7 +886,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--pri);box
 .msg.ok{background:#eefaf1;color:#1b5e20;border-color:#43a047}
 [data-theme=dark] .msg.error{background:#3a1717;color:#ffb4b4}
 [data-theme=dark] .msg.ok{background:#14301f;color:#9be3b6}
-.hint{font-size:.76rem;color:var(--mut);margin-top:.3rem;line-height:1.4}
+.hint{font-size:.8rem;color:var(--mut);margin-top:.3rem;line-height:1.5}
 .top-bar{background:var(--dark);color:#d6e6dc;padding:.45rem 2rem;font-size:.78rem;letter-spacing:.3px}
 .header-main{padding:.8rem 2rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;
  justify-content:space-between;flex-wrap:wrap;gap:.8rem 1.5rem;background:var(--card);position:sticky;top:0;z-index:100;
@@ -893,8 +909,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--pri);box
 .av-row>.nmf{flex:1;min-width:260px}.nmf .form-group{margin-bottom:.6rem}
 .pname{color:var(--acc);font-size:1.45rem;line-height:1.3;font-weight:700;word-break:break-word}
 .avwrap{position:relative;width:110px;height:110px;flex:none}
-.pen{position:absolute;right:0;bottom:0;width:34px;height:34px;border-radius:50%;border:3px solid var(--card);
- background:var(--pri);color:#fff;cursor:pointer;font-size:.75rem;display:flex;align-items:center;justify-content:center}
+.pen{position:absolute;right:4px;bottom:4px;width:24px;height:24px;border-radius:50%;border:2px solid var(--card);
+ background:var(--pri);color:#fff;cursor:pointer;font-size:.55rem;display:flex;align-items:center;justify-content:center;padding:0}
 .pen:hover{background:var(--hover)}
 .pop{display:none;position:absolute;left:0;top:118px;min-width:210px;background:var(--card);border:1px solid var(--bd);
  border-radius:10px;box-shadow:var(--sh);padding:.35rem;z-index:50}.pop.open{display:block}
@@ -991,10 +1007,10 @@ details.cg>summary::-webkit-details-marker{display:none}
 @media(max-width:700px){.g2,.g3{grid-template-columns:1fr}.pm-grid{grid-template-columns:1fr}.pm-grid dd{margin-bottom:.4rem}}
 @media(min-width:900px){.dlist{columns:2;column-gap:2.5rem}}
 @media(max-width:768px){
- .top-bar{padding:.5rem 1rem;font-size:.72rem}
+ .top-bar{padding:.5rem 1rem;font-size:.8rem}
  .header-main{padding:.8rem 1rem}
  .header-main nav{order:3;width:100%}
- .nav-menu{justify-content:center;gap:.2rem}.nav-menu a,.mb{padding:.5rem .7rem;font-size:.85rem}
+ .nav-menu{justify-content:center;gap:.2rem}.nav-menu a,.mb{padding:.5rem .7rem;font-size:.9rem}
  .user-badge{max-width:140px}
  .page-container{padding:1rem}
  .card{padding:1.1rem}
@@ -1025,23 +1041,38 @@ img,svg,canvas,video{max-width:100%}
 
   /* Navigation - make links wrap nicely, easy to tap */
   .nav-menu{flex-wrap:wrap;justify-content:center;gap:6px}
-  .nav-menu a,.mb{font-size:14px;padding:8px 12px;min-height:40px;display:flex;align-items:center;justify-content:center}
+  .nav-menu a,.mb{font-size:15px;padding:8px 12px;min-height:40px;display:flex;align-items:center;justify-content:center}
   .dd{position:fixed;left:12px;right:12px;min-width:0;margin-top:6px;max-height:60vh;overflow:auto}
 
   /* Main content - better spacing on small screens */
   .page-container{padding:15px;max-width:100%}
   .content{padding:12px}
 
-  /* Headings - adjust size */
-  .lh h1{font-size:20px}
-  h2.t{font-size:18px;margin-bottom:1rem}
-  .ct,h3.sub,.pn>h3{font-size:16px}
+  /* Headings - normal size, just more breathing room (text is NOT shrunk) */
+  .lh h1{font-size:1.3rem}
+  h2.t{font-size:1.4rem;margin-bottom:1.1rem;line-height:1.3}
+  .ct,h3.sub,.pn>h3{font-size:1.1rem;line-height:1.35}
 
   /* Cards - full width on mobile */
-  .card,.pn{width:100%;margin:10px 0;padding:14px}
+  .card,.pn{width:100%;margin:12px 0;padding:16px}
   .grid{grid-template-columns:1fr}
   .banner{aspect-ratio:auto}
   .banner img{height:auto;object-fit:contain}
+
+  /* Readable text, with space between lines and blocks so nothing feels crowded */
+  body{font-size:16px;line-height:1.6}
+  .hint{font-size:.88rem;line-height:1.55}
+  th,td{font-size:.95rem}
+  label{font-size:.95rem;margin-bottom:.5rem}
+  .form-group{margin-bottom:1.3rem}
+  .prose p,.prose li{line-height:1.8}
+  .prose h4{margin:1.3rem 0 .4rem}
+  .fnlist li,.dlist>li{margin-bottom:.7rem}
+  details{padding:1rem 0}
+  details p{line-height:1.7}
+  .stat p{font-size:.92rem}
+  .alert{font-size:.95rem}
+  table.rt td{padding:.6rem 0;line-height:1.5}
 
   /* Forms - 16px stops iPhone from zooming in, bigger tap targets */
   input,select,textarea{font-size:16px;padding:.8rem .9rem}
@@ -1054,12 +1085,12 @@ img,svg,canvas,video{max-width:100%}
   table.rt td .nm{justify-content:flex-end}
 
   /* Grouped lists, dialogs, footer */
-  details.cg>summary{padding:.8rem;font-size:.9rem}
+  details.cg>summary{padding:.8rem;font-size:1rem}
   .yg{padding:.2rem .8rem 1rem}
   .modal{padding:.5rem}
   .mbox,.mbox.wide{max-width:100%;padding:1.1rem}
   .mbox.wide{max-height:92vh}
-  .footer{padding:1.2rem 1rem calc(1.2rem + env(safe-area-inset-bottom));font-size:.78rem}
+  .footer{padding:1.2rem 1rem calc(1.2rem + env(safe-area-inset-bottom));font-size:.85rem}
 
   /* Admin dashboard */
   .tb{gap:.6rem}
@@ -1109,10 +1140,9 @@ input[readonly]{cursor:not-allowed}
   .nav-menu a.active:hover,.mb.active:hover{background:var(--pri);color:#fff}
 }
 
-/* Big enough tap targets on phones and tablets */
+/* Big enough tap targets on phones and tablets (the small profile pen keeps its small size) */
 @media (max-width:1024px){
-  .btn,.btn-sm,.mb,.theme-btn,.pen,.tpw,.hamb,.si,.nav-menu a,.dd a,.pop button{min-height:44px}
-  .pen{min-width:44px;min-height:44px;width:44px;height:44px}
+  .btn,.btn-sm,.mb,.theme-btn,.tpw,.hamb,.si,.nav-menu a,.dd a,.pop button{min-height:44px}
   .theme-btn,.hamb{min-width:44px}
   .btn-sm{padding:.6rem 1rem}
   .tpw{min-width:56px}
@@ -1152,10 +1182,10 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
   .page-container{padding-left:max(15px,env(safe-area-inset-left));padding-right:max(15px,env(safe-area-inset-right))}
 }
 @media (max-width:480px){
-  .top-bar{font-size:.68rem;line-height:1.35}
-  .logo-text h1{font-size:.9rem}
-  h2.t{font-size:1.15rem}
-  .stp{gap:.7rem}.stp .n{width:32px;height:32px}
+  .top-bar{font-size:.8rem;line-height:1.45}
+  .logo-text h1{font-size:.95rem}
+  h2.t{font-size:1.35rem}
+  .stp{gap:.8rem}.stp .n{width:34px;height:34px}
   .pm-head{flex-direction:column;align-items:flex-start}
   .av-row{justify-content:center;text-align:center}
   .mbtn{flex-wrap:wrap}.mbtn .btn{flex:1}
@@ -1163,7 +1193,7 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 }
 @media (max-width:360px){
   .tiles{grid-template-columns:1fr}
-  .nav-menu a,.mb{padding:8px 10px;font-size:13px}
+  .nav-menu a,.mb{padding:8px 10px;font-size:14px}
 }
 @media (max-height:500px) and (orientation:landscape){
   .modal{align-items:flex-start;overflow:auto}
@@ -1187,10 +1217,10 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
  .header-main nav{display:none}
  .dmb{display:inline-flex}
  .logo-group{flex:1;min-width:0;justify-content:flex-start}
- .logo-group .logo-circle{width:38px;height:38px}
+ .logo-group .logo-circle{width:42px;height:42px}
  .logo-text{min-width:0}
- .logo-text h1{font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- .logo-text p{display:block;font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .logo-text h1{font-size:.95rem;line-height:1.2;white-space:normal;overflow-wrap:anywhere}
+ .logo-text p{display:block;font-size:.8rem;line-height:1.3;white-space:normal}
  .user-area{gap:.4rem;flex:none;flex-wrap:nowrap}
  .user-area .theme-btn{display:none}
  .user-badge{padding:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;overflow:hidden}
@@ -1210,27 +1240,13 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 .so-desk{margin:0 0 1.4rem}
 .so-desk .btn{display:inline-flex;align-items:center;gap:.5rem}
 
-/* ========== NOTIFICATION BELL ========== */
-.bellw{position:relative}
-.bell{width:40px;height:40px;border-radius:50%;border:1px solid var(--bd);background:var(--card);color:var(--acc);cursor:pointer;position:relative;font-size:1rem}
-.bell:hover{background:var(--soft)}
-.bell .cnt{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:9px;background:#d93025;color:#fff;font-size:.68rem;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px}
-.npanel{display:none;position:absolute;right:0;top:48px;width:min(92vw,420px);background:var(--card);border:1px solid var(--bd);border-radius:14px;box-shadow:var(--sh);z-index:400;overflow:hidden}
-.npanel.open{display:block}
-.nph{display:flex;justify-content:space-between;align-items:center;padding:.8rem 1rem;border-bottom:1px solid var(--bd);font-weight:700;color:var(--acc)}
-.nph button{background:none;border:0;color:var(--acc);font-weight:600;font-size:.82rem;cursor:pointer}
-.nlist{max-height:min(70vh,520px);overflow-y:auto;overflow-x:hidden}
-.ni{display:flex;gap:.7rem;padding:.8rem 1rem;border-bottom:1px solid var(--bd);align-items:flex-start}
-.ni:last-child{border-bottom:0}
-.ni b{display:block;font-size:.86rem;white-space:normal;overflow-wrap:anywhere;color:var(--tx)}
-.ni small{display:block;color:var(--mut);font-size:.78rem;line-height:1.45;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
-.ni>div{flex:1;min-width:0}.ni .nw{font-size:.68rem;color:var(--mut);text-align:right;max-width:72px;line-height:1.3;flex:none}
+/* ========== NOTIFICATIONS (list items) ========== */
 .nic{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex:none}
 .nic.c1{background:#d9eefb;color:#2f8fd1}.nic.c2{background:#fde7de;color:#e7824f}.nic.c3{background:#dcf5e3;color:#25a35a}
 .nempty{padding:2rem 1rem;text-align:center;color:var(--mut);font-size:.88rem;line-height:2}
 .nempty i{font-size:1.6rem}
 
-/* ========== CLIENT SATISFACTION MEASUREMENT (feedback) ========== */
+/* ========== CLIENT SATISFACTION MEASUREMENT (survey on the login page) ========== */
 .csm-top{text-align:center;margin-bottom:1rem}
 .csm-top strong{color:var(--acc);font-size:1.1rem;display:block}
 .csm-top span{display:block;font-weight:700;letter-spacing:.8px;color:var(--mut);font-size:.8rem;margin-top:.2rem}
@@ -1243,7 +1259,7 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 .op input{position:absolute;opacity:0;width:1px;height:1px;padding:0;min-height:0;pointer-events:none}
 .op span{display:flex;flex-direction:column;align-items:center;gap:.3rem;text-align:center;padding:.65rem .3rem;border:1px solid var(--bd);border-radius:10px;background:var(--inp);height:100%;transition:.15s}
 .op span i{font-size:1.55rem;color:var(--mut)}
-.op span small{font-size:.68rem;line-height:1.2;color:var(--mut);font-weight:600}
+.op span small{font-size:.76rem;line-height:1.2;color:var(--mut);font-weight:600}
 .op input:checked+span{background:var(--soft);border-color:var(--acc)}
 .op input:checked+span i,.op input:checked+span small{color:var(--acc)}
 .op input:focus-visible+span{box-shadow:0 0 0 3px rgba(31,122,71,.35)}
@@ -1271,13 +1287,16 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 .nbody small{display:block;margin-top:.35rem;color:var(--mut);font-size:.78rem}
 .nnew{background:#d93025;color:#fff;font-size:.66rem;font-weight:700;padding:.15rem .55rem;border-radius:2rem;flex:none}
 
-/* ========== VISION / MISSION / GOALS (About Us) ========== */
+/* ========== VISION / MISSION / CORE VALUES (About Us) ========== */
 .vmg{text-align:center}
 .vmg-h{background:var(--pri);color:#fff;text-align:center;font-weight:500;font-size:1.55rem;line-height:1.3;padding:.15rem .6rem;margin:0 0 1.3rem;letter-spacing:.3px}
 .vmg p{color:var(--tx);line-height:1.85;font-size:.96rem}
-.vmg-goals{max-width:660px;margin:0 auto 1.4rem}
-.vmg-goals ol{text-align:left;padding-left:1.6rem}
-.vmg-goals li{color:var(--tx);line-height:1.85;font-size:.96rem;margin-bottom:.1rem}
+.cvals{max-width:760px;margin:0 auto 1.4rem}
+.cv{display:flex;align-items:center;gap:1.2rem;text-align:left;padding:.7rem 0;border-bottom:1px solid var(--bd)}
+.cv:last-child{border-bottom:0}
+.cv b{flex:none;width:3.2rem;text-align:center;font-size:1.3rem;color:var(--acc);font-weight:800}
+.cv span{color:var(--tx);font-size:1.05rem;line-height:1.5}
+.tagl{text-align:center;background:var(--pri);color:#fff;border-radius:12px;padding:.9rem 1rem;font-weight:500;font-size:1.05rem;margin-bottom:1.4rem}
 
 /* ========== QUALITY POLICY PAGE ========== */
 .qp-head{text-align:center;margin-bottom:1.4rem}
@@ -1413,10 +1432,13 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
 .center a{color:#003d1f;text-decoration:none;font-weight:600}.center a:hover{text-decoration:underline}
 .copy{text-align:center;font-size:.76rem;color:#8a948e;margin-top:1.3rem;line-height:1.6}
 .copy .lkb{font-size:1rem;color:#003d1f;font-weight:700;text-decoration:underline;padding:.45rem .6rem;margin-top:.2rem}
+.copy .links{display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:0 .2rem}
+.copy .links i{font-style:normal;color:#8a948e}
+.mbox.survey{max-width:780px;color:#1b2620}
 @media(max-width:480px){
  body{padding:.8rem .7rem calc(.8rem + env(safe-area-inset-bottom));align-items:flex-start}
  .lcard{padding:1.5rem 1.2rem 1.1rem;border-radius:20px;margin:auto 0}
- .lh .logo-circle{width:84px;height:84px}.lh h1{font-size:1.15rem}
+ .lh .logo-circle{width:84px;height:84px}.lh h1{font-size:1.25rem}
  .lcard .g3,.lcard .g2{grid-template-columns:1fr}
 }
 </style></head><body>
@@ -1520,8 +1542,8 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
   <div class="center" id="pgo"><a class="lk" href="/login">← Back to Log In</a></div>
  {% endif %}
 
- <p class="copy">© Southern Luzon State University — JGE Tagkawayan Campus
-  {% if page == 'login' %}<br><button type="button" class="lkb" onclick="openTerms()">Terms and Conditions</button>{% endif %}</p>
+ <div class="copy">© Southern Luzon State University — JGE Tagkawayan Campus
+  {% if page == 'login' %}<div class="links"><button type="button" class="lkb" onclick="openTerms()">Terms and Conditions</button><i>·</i><button type="button" class="lkb" onclick="openSurvey()">Client Satisfaction Survey</button></div>{% endif %}</div>
 </div>
 
 <div class="modal" id="terms"><div class="mbox wide"><button type="button" class="x" onclick="closeTerms()" aria-label="Close">&times;</button>
@@ -1538,6 +1560,48 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
    <li><strong>Changes.</strong> The campus may update these terms and may suspend accounts that misuse the system.</li></ul></div>
  <div class="mbtn"><button type="button" class="btn btn-sm" onclick="closeTerms()">I understand</button></div></div></div>
 
+{% if page == 'login' %}
+<div class="modal" id="csm"><div class="mbox wide survey"><button type="button" class="x" onclick="closeSurvey()" aria-label="Close">&times;</button>
+ <form method="POST" action="/survey" class="csm">
+  <div class="csm-top"><strong>SOUTHERN LUZON STATE UNIVERSITY</strong><span>HELP US SERVE YOU BETTER!</span></div>
+  <p class="hint" style="font-size:.9rem;line-height:1.6">This Client Satisfaction Measurement (CSM) tracks the customer experience of government offices. Your feedback on your <u>recently concluded transaction</u> will help this office provide a better service. You do not need to log in. Your answers are anonymous and you always have the option to not answer this form.</p>
+  <div class="form-group" style="margin-top:1rem"><label>Client type *</label>
+   {% for c in ['Citizen','Business','Government (Employee or another agency)'] %}<label class="rq"><input type="radio" name="client_type" value="{{ c }}" required {{ 'checked' if loop.first }}> {{ c }}</label>{% endfor %}</div>
+  <div class="g2">
+   <div class="form-group"><label>Date</label><input type="date" value="{{ today }}" readonly></div>
+   <div class="form-group"><label>Sex *</label>
+    <label class="rq"><input type="radio" name="sex" value="Male" required> Male</label>
+    <label class="rq"><input type="radio" name="sex" value="Female"> Female</label></div>
+   <div class="form-group"><label>Age *</label><input type="number" name="age" min="1" max="120" required></div>
+   <div class="form-group"><label>Region of residence *</label><input name="region" required maxlength="80" value="Region IV-A (CALABARZON)"></div></div>
+  <div class="form-group"><label>Service availed *</label><select name="service" required><option value="">-- Select the service you availed --</option>
+   {% for d in docs %}<option>{{ d }}</option>{% endfor %}<option>Other</option></select></div>
+
+  <h3 class="ct">Citizen's Charter (CC) questions</h3>
+  <p class="hint">The Citizen's Charter is an official document that reflects the services of a government agency/office including its requirements, fees, and processing times among others.</p>
+  <div class="form-group"><label>CC1. Which of the following best describes your awareness of a CC? *</label>
+   <label class="rq"><input type="radio" name="cc1" value="1" required> 1. I know what a CC is, and I saw this office's CC.</label>
+   <label class="rq"><input type="radio" name="cc1" value="2"> 2. I know what a CC is, but I did NOT see this office's CC.</label>
+   <label class="rq"><input type="radio" name="cc1" value="3"> 3. I learned of the CC only when I saw this office's CC.</label>
+   <label class="rq"><input type="radio" name="cc1" value="4"> 4. I do not know what a CC is, and I did not see one in this office. (Answer N/A on CC2 and CC3)</label></div>
+  <div class="form-group"><label>CC2. If aware of CC (answered 1-3 in CC1), would you say that the CC of this office was...? *</label>
+   {% for v, t in [('1','1. Easy to see'),('2','2. Somewhat easy to see'),('3','3. Difficult to see'),('4','4. Not visible at all'),('5','5. N/A')] %}<label class="rq"><input type="radio" name="cc2" value="{{ v }}" required> {{ t }}</label>{% endfor %}</div>
+  <div class="form-group"><label>CC3. If aware of CC (answered codes 1-3 in CC1), how much did the CC help you in your transaction? *</label>
+   {% for v, t in [('1','1. Helped very much'),('2','2. Somewhat helped'),('3','3. Did not help'),('4','4. N/A')] %}<label class="rq"><input type="radio" name="cc3" value="{{ v }}" required> {{ t }}</label>{% endfor %}</div>
+
+  <h3 class="ct">Service Quality Dimensions (SQD)</h3>
+  <p class="hint">For SQD 0-8, please select the answer that best corresponds to your experience.</p>
+  {% set opts = [('1','fa-face-frown','Strongly Disagree'),('2','fa-face-frown-open','Disagree'),('3','fa-face-meh','Neither Agree nor Disagree'),('4','fa-face-smile','Agree'),('5','fa-face-grin-beam','Strongly Agree'),('NA','fa-ban','N/A Not Applicable')] %}
+  {% for q in csm_sqd %}{% set i = loop.index0 %}<div class="sqd"><p><b>SQD{{ i }}.</b> {{ q }}</p><div class="opts">
+   {% for v, ic, lb in opts %}<label class="op"><input type="radio" name="sqd{{ i }}" value="{{ v }}" required><span><i class="fas {{ ic }}"></i><small>{{ lb }}</small></span></label>{% endfor %}</div></div>{% endfor %}
+
+  <div class="form-group" style="margin-top:1.2rem"><label>Suggestions on how we can further improve our services (optional)</label>
+   <textarea name="suggestions" rows="4" maxlength="1000" placeholder="Tell us what is working and what we can improve"></textarea></div>
+  <div class="form-group"><label>Email address (optional)</label><input type="email" name="email" maxlength="120" placeholder="yourname@gmail.com"></div>
+  <button class="btn btn-full">Submit Survey</button>
+  <p class="fcode">THANK YOU! · SP-SLSU-8.0F1, rev. 0 · Effective: 08/07/2023</p></form></div></div>
+{% endif %}
+
 <script>
 """ + TOUCH_JS + DATE_JS + """
 function tp(id,b){const i=document.getElementById(id),s=i.type==='password';i.type=s?'text':'password';
@@ -1546,10 +1610,14 @@ function lv(){const l=document.getElementById('level');if(!l)return;const c=l.va
  [['blkCollege',c],['blkLhs',!c]].forEach(a=>{const b=document.getElementById(a[0]);b.classList.toggle('hid',!a[1]);
   b.querySelectorAll('select,input').forEach(x=>{x.disabled=!a[1];x.required=a[1]})})}
 lv();
-const tm=document.getElementById('terms');
+const tm=document.getElementById('terms'),sv=document.getElementById('csm');
 function openTerms(){tm.classList.add('open')}function closeTerms(){tm.classList.remove('open')}
+function openSurvey(){if(sv)sv.classList.add('open')}function closeSurvey(){if(sv)sv.classList.remove('open')}
 tm.addEventListener('click',e=>{if(e.target===tm)closeTerms()});
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeTerms()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeTerms();closeSurvey()}});
+/* survey: "I do not know what a CC is" answers CC2 and CC3 with N/A */
+document.querySelectorAll('input[name="cc1"]').forEach(r=>r.addEventListener('change',()=>{
+ if(r.value==='4'&&r.checked){const a=document.querySelector('input[name="cc2"][value="5"]'),b=document.querySelector('input[name="cc3"][value="4"]');if(a)a.checked=true;if(b)b.checked=true}}));
 document.querySelectorAll('.msg').forEach(m=>{if(m.id==='fp')return;m.style.cursor='pointer';
  setTimeout(()=>{m.style.opacity=0;setTimeout(()=>m.remove(),350)},{{ flash_ms }}+2500);m.addEventListener('click',()=>m.remove())});
 </script>
@@ -1582,9 +1650,8 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <li><a href="#book">Book Appointment</a></li><li><a href="#my-appointments">My Appointments</a></li>
   <li class="more"><button type="button" id="moreBtn" class="mb">More ▾</button><ul class="dd" id="dd">
    <li><a href="#help">Help</a></li><li><a href="#about">About Us</a></li><li><a href="#quality">Quality Policy</a></li><li><a href="#faqs">FAQs</a></li><li><a href="#terms">Terms of Use</a></li>
-   <li><a href="#privacy">Privacy Policy</a></li><li><a href="#contact">Contact Us</a></li><li><a href="#feedback">Send Feedback</a></li></ul></li></ul></nav>
+   <li><a href="#privacy">Privacy Policy</a></li><li><a href="#contact">Contact Us</a></li></ul></li></ul></nav>
  <div class="user-area">""" + THEME_BTN + """
-  <div class="bellw"><button type="button" class="bell" id="bell" aria-label="Notifications" onclick="sw('notifications')"><i class="fas fa-bell"></i>{% set unread = notifs|selectattr('new')|list|length %}{% if unread %}<span class="cnt" id="ncnt">{{ unread }}</span>{% endif %}</button></div>
   <a href="#profile" class="user-badge" onclick="sw('profile');return false">{% if avatar %}<img class="av" src="{{ avatar }}" alt="">{% else %}<i class="fas fa-user-circle"></i>{% endif %} <span class="un">{{ session.fullname }}</span></a>
   <button type="button" class="dmb" id="dopen" aria-label="Open menu"><i class="fas fa-bars"></i></button></div>
 </header>
@@ -1605,7 +1672,6 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <a href="#terms" data-go="terms"><i class="fas fa-file-contract"></i><span>Terms of Use</span></a>
   <a href="#privacy" data-go="privacy"><i class="fas fa-shield-halved"></i><span>Privacy Policy</span></a>
   <a href="#contact" data-go="contact"><i class="fas fa-address-book"></i><span>Contact Us</span></a>
-  <a href="#feedback" data-go="feedback"><i class="fas fa-comment-dots"></i><span>Send Feedback</span></a>
   <a href="#" id="dtheme"></a>
   <hr><a href="/logout"><i class="fas fa-right-from-bracket"></i><span>Sign Out</span></a>
  </nav></aside>
@@ -1703,14 +1769,13 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
     <div class="avwrap">
      <img id="avPrev" class="av-lg {{ 'hid' if not avatar }}" src="{{ avatar or '' }}" alt="Profile picture">
      <div id="avPh" class="av-lg av-ph {{ 'hid' if avatar }}"><i class="fas fa-user"></i></div>
-     <button type="button" class="pen" id="penBtn" title="Edit profile picture"><i class="fas fa-pen"></i></button>
+     <button type="button" class="pen" id="penBtn" title="Edit profile picture" aria-label="Edit profile picture"><i class="fas fa-pen"></i></button>
      <div class="pop" id="pop">
       <button type="button" id="popChoose"><i class="fas fa-image"></i> Change &amp; adjust photo</button>
       <button type="button" id="popRemove"><i class="fas fa-trash"></i> Remove photo</button></div></div>
     <div class="nmf">
      {% set mid = '' if (nm.mn or '').strip()|upper in ('', 'N/A') else nm.mn %}
-     <h3 class="pname" id="pName">{{ [nm.fn, mid, nm.ln]|select|join(' ') }}</h3>
-     <p class="hint">Tap the pen to change, adjust or remove your photo, then press Save Profile.</p></div>
+     <h3 class="pname" id="pName">{{ [nm.fn, mid, nm.ln]|select|join(' ') }}</h3></div>
     <input type="file" name="avatar" id="avIn" accept="image/png,image/jpeg,image/webp,image/gif" class="hid">
     <input type="checkbox" name="remove_avatar" id="rmAv" class="hid">
     <input type="file" id="avPick" accept="image/png,image/jpeg,image/webp,image/gif" class="hid"></div>
@@ -1752,7 +1817,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <div class="stp"><div class="n">4</div><div><h4>Add your comments</h4><p>Optional, but helpful: write the number of copies, the purpose of the request, or the school year / semester you need.</p></div></div>
    <div class="stp"><div class="n">5</div><div><h4>Pick a date and time</h4><p>Choose a future weekday and a time slot. Slots run from 9:00 AM to 3:00 PM and include the 12:00 NN – 01:00 PM slot.</p><div class="chips"><span class="chip">Mon–Fri only</span><span class="chip">Future dates only</span><span class="chip">Limited slots per time</span></div></div></div>
    <div class="stp"><div class="n">6</div><div><h4>Enter your contact number and payment</h4><p>Type your mobile number (09XXXXXXXXX). Payment is made at the <strong>SLSU JGE Campus Cashier</strong>.</p></div></div>
-   <div class="stp"><div class="n">7</div><div><h4>Submit the appointment</h4><p>Press <strong>Submit Appointment</strong>. You will find it under <strong>My Appointments</strong> as <span class="bdg pend">Pending</span>, and you will get a notification on the bell.</p></div></div>
+   <div class="stp"><div class="n">7</div><div><h4>Submit the appointment</h4><p>Press <strong>Submit Appointment</strong>. You will find it under <strong>My Appointments</strong> as <span class="bdg pend">Pending</span>, and you will get a notification under <strong>Notifications</strong>.</p></div></div>
    <div class="stp"><div class="n">8</div><div><h4>Visit the office and claim</h4><p>Come on your scheduled date and time with your requirements and valid ID. If someone claims for you, bring an authorization letter, a copy of your ID and the representative's valid ID.</p><p class="hint">Office days: {{ cdays }}</p></div></div></div>
   <div class="card prose"><h3 class="ct"><i class="fas fa-circle-question"></i> Common problems</h3>
    <details><summary>I cannot sign in.</summary><p>Use the Gmail or Student ID you registered with. If you registered recently, your account may still be waiting for approval, so please try again later. Forgot your password? Press <strong>Forgot password?</strong> on the sign-in page and we will email you a 6-digit code to reset it.</p></details>
@@ -1763,14 +1828,16 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 
    <details><summary>I need to change or cancel a booking.</summary><p>Please contact the Registrar's Office before your appointment date.</p></details></div>
   <div class="card prose"><h3 class="ct"><i class="fas fa-headset"></i> Still need help?</h3>
-   <p>Read the <a href="#faqs" onclick="sw('faqs')" style="color:var(--acc)">FAQs</a>, see our <a href="#contact" onclick="sw('contact')" style="color:var(--acc)">contact details</a>, or send a message through <a href="#feedback" onclick="sw('feedback')" style="color:var(--acc)">Send Feedback</a>.</p></div></section>
+   <p>Read the <a href="#faqs" onclick="sw('faqs')" style="color:var(--acc)">FAQs</a> or see our <a href="#contact" onclick="sw('contact')" style="color:var(--acc)">contact details</a>.</p></div></section>
  <section id="about" class="section"><h2 class="t">About Us</h2>
   <div class="banner"><img src="{{ about_banner }}" alt="" data-fb="{{ banner }}|{{ bg }}" onerror="fb(this)"></div>
   <div class="card prose"><p>The Office of the Registrar of Southern Luzon State University – JGE Tagkawayan Campus keeps and issues official student academic records. This appointment system was built to make requesting documents faster, more organized and less crowded for students and registrar staff alike.</p></div>
   <div class="g2">
    <div class="card vmg"><h3 class="vmg-h">Vision</h3><p>{{ about.vision }}</p></div>
    <div class="card vmg"><h3 class="vmg-h">Mission</h3><p>{{ about.mission }}</p></div></div>
-  <div class="card vmg vmg-goals"><h3 class="vmg-h">Goals</h3><ol>{% for g in about.goals %}<li>{{ g }}</li>{% endfor %}</ol></div>
+  <div class="card vmg cvals"><h3 class="vmg-h">Core Values</h3>
+   {% for k, v in about['values'] %}<div class="cv"><b>{{ k }}</b><span>{{ v }}</span></div>{% endfor %}</div>
+  <div class="tagl">{{ about.tagline }}</div>
   <div class="card prose"><h3 class="ct"><i class="fas fa-landmark"></i> Our History</h3>{% for p in about.history %}<p>{{ p }}</p>{% endfor %}</div>
   <div class="card prose mapbox"><h3 class="ct"><i class="fas fa-location-dot"></i> Where to find us</h3>
    <p>{{ caddr }} · Southern Luzon State University – JGE Tagkawayan Campus</p>
@@ -1796,6 +1863,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <details><summary>Where can I see my finished requests?</summary><p>Once the registrar marks your request as done, it moves to <strong>Completed Transactions</strong> under My Appointments, with the date and time it was completed.</p></details>
 
   <details><summary>Can Laboratory High School students use this portal?</summary><p>Yes. Choose <strong>Laboratory High School Student</strong> when you register and enter your grade level and section. Your requests are listed for the registrar by grade level and section.</p></details>
+  <details><summary>Where is the Client Satisfaction Survey?</summary><p>It is on the Log In page, beside <strong>Terms and Conditions</strong>. You can answer it after you sign out, without logging in.</p></details>
   <details><summary>I forgot my password.</summary><p>Press <strong>Forgot password?</strong> on the sign-in page, enter your Gmail or Student ID, and we will email a 6-digit code to your Gmail address. Enter the code, then choose a new password. The code works for 10 minutes.</p></details></div></section>
  <section id="terms" class="section"><h2 class="t">Terms of Use</h2><div class="card prose">
   <p class="hint">Last updated: October 21, 2026</p>
@@ -1805,9 +1873,9 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <h4>3. Accurate information</h4><p>Give true, complete and current information, exactly as in your school records. False or misleading information, or using another person's identity, may lead to rejection, suspension or removal of your account and may be reported to the proper university office.</p>
   <h4>4. Appointments and document requests</h4><p>A booking is a request for a schedule, not a guarantee that your document is ready or will be released. Appointments are available on weekdays only, on future dates, and each time slot has limited capacity. Request only your own records, or records you are authorized to request.</p>
   <h4>5. Requirements, fees and claiming</h4><p>Bring the complete requirements shown for your document and a valid ID. Fees are paid at the SLSU JGE Campus Cashier. Processing times and fees follow the Registrar's policies and the Citizen's Charter and may change without prior notice. A representative may claim a document only with an authorization letter, a copy of your ID and the representative's valid ID.</p>
-  <h4>6. Notifications and emails</h4><p>The System shows reminders under the notification bell and may send password reset codes and password-change notices to your registered Gmail address. Keep your email address correct and check your Spam folder.</p>
+  <h4>6. Notifications and emails</h4><p>The System shows reminders under Notifications and may send password reset codes and password-change notices to your registered Gmail address. Keep your email address correct and check your Spam folder.</p>
   <h4>7. Acceptable use</h4><p>You agree not to: attempt to access other users' data or the admin area; upload harmful, unlawful or offensive content (including profile photos); interfere with, overload or try to break the System; submit false bookings or spam; or use automated tools to book appointments.</p>
-  <h4>8. Feedback</h4><p>Feedback you send, including the Client Satisfaction Measurement form, may be used by the Campus to improve its services. Answering the form is optional.</p>
+  <h4>8. Feedback</h4><p>Answers to the Client Satisfaction Survey on the Log In page may be used by the Campus to improve its services. Answering the survey is optional and anonymous.</p>
   <h4>9. Availability of the System</h4><p>We work to keep the System available, but we do not promise uninterrupted service. It may be unavailable during maintenance, power or internet interruptions, or events beyond our control. For urgent requests, visit the Registrar's Office during office days: {{ cdays }}</p>
   <h4>10. Ownership</h4><p>The System, its design, and the names and seals of Southern Luzon State University belong to the University and its developers. You may not copy or reuse them without permission. Your own records and information remain yours.</p>
   <h4>11. Suspension and termination</h4><p>The Campus may suspend or remove accounts that violate these terms or misuse the System. You may ask the Registrar's Office to close your account at any time.</p>
@@ -1822,9 +1890,9 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <li><strong>School details:</strong> program or grade level, year level, section.</li>
    <li><strong>Optional profile details:</strong> contact number, address and profile picture.</li>
    <li><strong>Transaction details:</strong> the documents you request, comments, preferred schedule, payment method, and the status of each appointment.</li>
-   <li><strong>Feedback:</strong> your answers to the Client Satisfaction Measurement form, including the optional suggestions and email address.</li>
+   <li><strong>Survey answers:</strong> your answers to the Client Satisfaction Survey, which is submitted anonymously, including the optional suggestions and email address.</li>
    <li><strong>Technical data:</strong> a session cookie that keeps you signed in, and your theme preference (light or dark) saved on your device.</li></ul>
-  <h4>2. Why we collect it</h4><p>We use your information to verify your identity and approve your account; to schedule and process your document requests; to send you notifications about your account and appointments and password reset codes; to help registrar staff prepare your documents; to answer your concerns; and to improve our services through feedback and anonymous statistics.</p>
+  <h4>2. Why we collect it</h4><p>We use your information to verify your identity and approve your account; to schedule and process your document requests; to send you notifications about your account and appointments and password reset codes; to help registrar staff prepare your documents; to answer your concerns; and to improve our services through survey answers and anonymous statistics.</p>
   <h4>3. Legal basis</h4><p>We process your information because it is necessary to provide the registrar services you request, to carry out the Campus's functions as a state university, and, where needed, with your consent, which you give when you register and use the System.</p>
   <h4>4. Who can see your information</h4><p>Only authorized Registrar's Office personnel and system administrators. We do not sell, rent or trade your information. We disclose it to other parties only when required by law or by a government agency with authority, such as CHED, or when you ask us to send a document to a third party (for example for authentication).</p>
   <h4>5. Storage, security and retention</h4><p>Records are kept in a secured database managed by the Campus. We use reasonable organizational, physical and technical safeguards, including hashed passwords, restricted admin access and limited login sessions. We keep your information while your account is active and as long as needed for school records and legal requirements, after which it is deleted or anonymized. No system is completely secure, so please protect your password.</p>
@@ -1842,46 +1910,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <li><i class="fab fa-facebook"></i><div><strong>Facebook</strong><br>{% if cfb %}<a href="{{ cfb }}" target="_blank" rel="noopener">{{ cfb }}</a>{% else %}<span class="soon">To be announced</span>{% endif %}</div></li>
    {% if cphone %}<li><i class="fas fa-phone"></i><div><strong>Phone</strong><br>{{ cphone }}</div></li>{% endif %}
    <li><i class="fas fa-clock"></i><div><strong>Office days</strong><br>{{ cdays }}</div></li></ul>
-  <p>For other concerns, you can also use <a href="#feedback" onclick="sw('feedback')" style="color:var(--acc)">Send Feedback</a>.</p></div></section>
- <section id="feedback" class="section"><h2 class="t">Send Feedback</h2>
- <form method="POST" action="/feedback" class="card csm">
-  <div class="csm-top"><strong>SOUTHERN LUZON STATE UNIVERSITY</strong><span>HELP US SERVE YOU BETTER!</span></div>
-  <p class="hint" style="font-size:.88rem;line-height:1.6">This Client Satisfaction Measurement (CSM) tracks the customer experience of government offices. Your feedback on your <u>recently concluded transaction</u> will help this office provide a better service. Personal information shared will be kept confidential and you always have the option to not answer this form.</p>
-  <div class="form-group" style="margin-top:1rem"><label>Client type *</label>
-   {% for c in ['Citizen','Business','Government (Employee or another agency)'] %}<label class="rq"><input type="radio" name="client_type" value="{{ c }}" required {{ 'checked' if loop.first }}> {{ c }}</label>{% endfor %}</div>
-  <div class="g2">
-   <div class="form-group"><label>Date</label><input type="date" value="{{ today }}" readonly></div>
-   <div class="form-group"><label>Sex *</label>
-    <label class="rq"><input type="radio" name="sex" value="Male" required {{ 'checked' if me.get('gender')=='Male' }}> Male</label>
-    <label class="rq"><input type="radio" name="sex" value="Female" {{ 'checked' if me.get('gender')=='Female' }}> Female</label></div>
-   <div class="form-group"><label>Age *</label><input type="number" name="age" min="1" max="120" required value="{{ me.get('age','') }}"></div>
-   <div class="form-group"><label>Region of residence *</label><input name="region" required maxlength="80" value="Region IV-A (CALABARZON)"></div></div>
-  <div class="form-group"><label>Service availed *</label><select name="service" required><option value="">-- Select the service you availed --</option>
-   {% for d in docs %}<option>{{ d }}</option>{% endfor %}<option>Other</option></select></div>
-
-  <h3 class="ct">Citizen's Charter (CC) questions</h3>
-  <p class="hint">The Citizen's Charter is an official document that reflects the services of a government agency/office including its requirements, fees, and processing times among others.</p>
-  <div class="form-group"><label>CC1. Which of the following best describes your awareness of a CC? *</label>
-   <label class="rq"><input type="radio" name="cc1" value="1" required> 1. I know what a CC is, and I saw this office's CC.</label>
-   <label class="rq"><input type="radio" name="cc1" value="2"> 2. I know what a CC is, but I did NOT see this office's CC.</label>
-   <label class="rq"><input type="radio" name="cc1" value="3"> 3. I learned of the CC only when I saw this office's CC.</label>
-   <label class="rq"><input type="radio" name="cc1" value="4"> 4. I do not know what a CC is, and I did not see one in this office. (Answer N/A on CC2 and CC3)</label></div>
-  <div class="form-group"><label>CC2. If aware of CC (answered 1-3 in CC1), would you say that the CC of this office was...? *</label>
-   {% for v, t in [('1','1. Easy to see'),('2','2. Somewhat easy to see'),('3','3. Difficult to see'),('4','4. Not visible at all'),('5','5. N/A')] %}<label class="rq"><input type="radio" name="cc2" value="{{ v }}" required> {{ t }}</label>{% endfor %}</div>
-  <div class="form-group"><label>CC3. If aware of CC (answered codes 1-3 in CC1), how much did the CC help you in your transaction? *</label>
-   {% for v, t in [('1','1. Helped very much'),('2','2. Somewhat helped'),('3','3. Did not help'),('4','4. N/A')] %}<label class="rq"><input type="radio" name="cc3" value="{{ v }}" required> {{ t }}</label>{% endfor %}</div>
-
-  <h3 class="ct">Service Quality Dimensions (SQD)</h3>
-  <p class="hint">For SQD 0-8, please select the answer that best corresponds to your experience.</p>
-  {% set opts = [('1','fa-face-frown','Strongly Disagree'),('2','fa-face-frown-open','Disagree'),('3','fa-face-meh','Neither Agree nor Disagree'),('4','fa-face-smile','Agree'),('5','fa-face-grin-beam','Strongly Agree'),('NA','fa-ban','N/A Not Applicable')] %}
-  {% for q in csm_sqd %}{% set i = loop.index0 %}<div class="sqd"><p><b>SQD{{ i }}.</b> {{ q }}</p><div class="opts">
-   {% for v, ic, lb in opts %}<label class="op"><input type="radio" name="sqd{{ i }}" value="{{ v }}" required><span><i class="fas {{ ic }}"></i><small>{{ lb }}</small></span></label>{% endfor %}</div></div>{% endfor %}
-
-  <div class="form-group" style="margin-top:1.2rem"><label>Suggestions on how we can further improve our services (optional)</label>
-   <textarea name="suggestions" rows="4" maxlength="1000" placeholder="Tell us what is working and what we can improve"></textarea></div>
-  <div class="form-group"><label>Email address (optional)</label><input type="email" name="email" maxlength="120" placeholder="yourname@gmail.com"></div>
-  <button class="btn btn-full">Submit Feedback</button>
-  <p class="fcode">THANK YOU! · SP-SLSU-8.0F1, rev. 0 · Effective: 08/07/2023</p></form></section>
+  <p>For other concerns, please visit the Registrar's Office during office days.</p></div></section>
 </div>
 <div class="modal" id="crop"><div class="mbox"><h3 class="ct">Adjust photo</h3>
  <canvas id="cv" width="300" height="300"></canvas>
@@ -1956,7 +1985,7 @@ if(dtm){const pt=()=>{const d=document.documentElement.dataset.theme==='dark';
  dtm.addEventListener('click',e=>{e.preventDefault();document.getElementById('themeBtn').click();pt()});pt()}
 
 /* ---- notifications page ---- */
-function markRead(){const c=document.getElementById('ncnt');if(c){c.remove();fetch('/notifications/read',{method:'POST'}).catch(()=>{})}}
+function markRead(){fetch('/notifications/read',{method:'POST'}).catch(()=>{})}
 document.querySelectorAll('.nft').forEach(b=>b.addEventListener('click',()=>{
  document.querySelectorAll('.nft').forEach(x=>x.classList.toggle('active',x===b));
  let n=0;document.querySelectorAll('#nbig .nrow').forEach(r=>{const s=b.dataset.f==='all'||r.dataset.new==='1';r.style.display=s?'':'none';if(s)n++});
@@ -1964,12 +1993,8 @@ document.querySelectorAll('.nft').forEach(b=>b.addEventListener('click',()=>{
 document.getElementById('nclear').addEventListener('click',()=>{
  fetch('/notifications/clear',{method:'POST'}).then(()=>{
   document.getElementById('nbig').innerHTML='<div class="card nempty"><i class="fas fa-bell-slash"></i><br>You are all caught up</div>';
-  document.getElementById('nnone').style.display='none';
-  const c=document.getElementById('ncnt');if(c)c.remove()}).catch(()=>{})});
+  document.getElementById('nnone').style.display='none'}).catch(()=>{})});
 
-/* ---- survey: "I do not know what a CC is" answers CC2 and CC3 with N/A ---- */
-document.querySelectorAll('input[name="cc1"]').forEach(r=>r.addEventListener('change',()=>{
- if(r.value==='4'&&r.checked){const a=document.querySelector('input[name="cc2"][value="5"]'),b=document.querySelector('input[name="cc3"][value="4"]');if(a)a.checked=true;if(b)b.checked=true}}));
 const dIn=document.querySelector('input[name="sched_date"]');
 if(dIn){const tmw=new Date();tmw.setDate(tmw.getDate()+1);const p2=n=>String(n).padStart(2,'0');
  dIn.min=tmw.getFullYear()+'-'+p2(tmw.getMonth()+1)+'-'+p2(tmw.getDate());
@@ -2040,6 +2065,7 @@ ADMIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 [data-theme=dark] .t1{background:#2a2144}[data-theme=dark] .t2{background:#17303f}[data-theme=dark] .t3{background:#3d2a21}[data-theme=dark] .t4{background:#163324}
 .two{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:1.2rem}
 .two>.pn{min-width:0}
+.two.eq{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 .gl{stroke:var(--bd)}.ax{fill:var(--mut);font-size:10px}.ink{fill:var(--tx)}
 .dn{display:flex;flex-direction:column;align-items:center;gap:.8rem}
 .dn .leg{display:flex;gap:1.2rem;font-size:.82rem;color:var(--mut);flex-wrap:wrap;justify-content:center}
@@ -2064,7 +2090,15 @@ ADMIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 .mut{color:var(--mut);font-size:.76rem}
 form.in{display:inline}
 .sbov{display:none}
-@media(max-width:1100px){.tiles{grid-template-columns:1fr 1fr}.two{grid-template-columns:1fr}}
+/* survey summary bars */
+.br{margin:.7rem 0}
+.br .l{display:flex;justify-content:space-between;gap:.8rem;font-size:.86rem;margin-bottom:.3rem}
+.br .l b{color:var(--acc);white-space:nowrap}
+.br .tr{height:11px;background:var(--bd);border-radius:6px;overflow:hidden}
+.br .fl{height:100%;background:var(--pri);border-radius:6px}
+.sug{padding:.8rem 0;border-bottom:1px solid var(--bd);font-size:.9rem;line-height:1.55}
+.sug:last-child{border:0}.sug small{display:block;color:var(--mut);font-size:.76rem;margin-top:.2rem}
+@media(max-width:1100px){.tiles{grid-template-columns:1fr 1fr}.two,.two.eq{grid-template-columns:1fr}}
 @media(max-width:960px){
  .sb{position:fixed;left:-270px;top:0;transition:left .25s;box-shadow:var(--sh)}
  body.sbo .sb{left:0}
@@ -2081,6 +2115,7 @@ form.in{display:inline}
  {% if sel %}<select class="flt-c"><option value="">All programs</option>{% for c in courses %}<option>{{ c }}</option>{% endfor %}<option>{{ lhs }}</option></select>
  <select class="flt-y"><option value="">All years / grades</option>{% for y in years %}<option>{{ y }}</option>{% endfor %}{% for g in grades %}<option>{{ g }}</option>{% endfor %}</select>{% endif %}
  <span class="hint cnt"></span></div>{% endmacro %}
+{% macro bars(items) %}{% for x in items %}<div class="br"><div class="l"><span>{{ x.label }}</span><b>{{ x.pct }}% <span class="mut">({{ x.n }})</span></b></div><div class="tr"><div class="fl" style="width:{{ x.pct }}%"></div></div></div>{% endfor %}{% endmacro %}
 {% macro cy(groups, kind) %}
 {% for course, n, yrs in groups %}
 <details class="cg" open><summary><span><i class="fas fa-graduation-cap"></i>&nbsp; {{ course }}</span><span class="pill">{{ n }}</span></summary>
@@ -2115,7 +2150,8 @@ form.in{display:inline}
   <a class="si" data-tab="missed" href="#missed"><i class="fas fa-user-xmark"></i> Missed <span class="bd2">{{ missed_count }}</span></a>
   <a class="si" data-tab="accounts" href="#accounts"><i class="fas fa-user-clock"></i> Pending Accounts <span class="bd2">{{ total_pending }}</span></a>
   <a class="si" data-tab="users-list" href="#users-list"><i class="fas fa-user-graduate"></i> Students <span class="bd2">{{ total_approved }}</span></a>
-  <a class="si" data-tab="feedback-list" href="#feedback-list"><i class="fas fa-comments"></i> Feedback <span class="bd2">{{ feedback|length }}</span></a>
+  <a class="si" data-tab="feedback-list" href="#feedback-list"><i class="fas fa-chart-pie"></i> Survey Results <span class="bd2">{{ csm.n }}</span></a>
+  <a class="si" href="/orderpay"><i class="fas fa-receipt"></i> Order of Payment</a>
  </nav>
  <div class="sb-foot">
   <a href="/logout" class="si" style="color:#c62828"><i class="fas fa-right-from-bracket"></i> Sign Out</a></div>
@@ -2185,10 +2221,31 @@ form.in{display:inline}
   <div id="blk-users">{{ cy(approved_groups, 'users') }}<div class="pn empty nores" style="display:none">No matching students found.</div></div>
   {% else %}<div class="pn empty">No approved accounts yet.</div>{% endif %}</div>
 
- <div class="tab-content" id="feedback-list"><h2 class="t">Student Feedback</h2>
-  {% if feedback %}<div class="pn tw"><table class="rt"><tr class="hr"><th>Date</th><th>Student</th><th>Category</th><th>Rating</th><th>Message</th></tr>
-   {% for f in feedback %}<tr class="dr"><td data-label="Date">{{ f.at }}</td><td data-label="Student">{{ f.name }} ({{ f.studentid }})</td><td data-label="Category">{{ f.category }}</td><td data-label="Rating">{{ '★' * f.rating }}</td><td class="wrap" data-label="Message" style="min-width:260px">{{ f.message }}</td></tr>{% endfor %}</table></div>
-  {% else %}<div class="pn empty">No feedback yet.</div>{% endif %}</div>
+ <div class="tab-content" id="feedback-list"><h2 class="t">Client Satisfaction Survey Results <small style="font-size:.7em;color:var(--mut);font-weight:500">· summary in percent</small></h2>
+  {% if csm.n %}
+  <div class="pn"><div class="tiles">
+   <div class="tile t1"><div><small>Responses</small><b>{{ csm.n }}</b></div><i class="fas fa-clipboard-list"></i></div>
+   <div class="tile t4"><div><small>Overall satisfaction</small><b>{{ csm.overall }}%</b></div><i class="fas fa-face-smile"></i></div>
+   <div class="tile t2"><div><small>Average rating (1-5)</small><b>{{ csm.avg }}</b></div><i class="fas fa-star"></i></div>
+   <div class="tile t3"><div><small>With suggestions</small><b>{{ sugg|length }}</b></div><i class="fas fa-comment-dots"></i></div></div>
+   <p class="hint" style="margin-top:.8rem">Overall satisfaction = share of SQD answers that are <strong>Agree</strong> or <strong>Strongly Agree</strong> (N/A answers are not counted).</p></div>
+  <div class="two eq">
+   <div class="pn"><h3>Client type</h3>{{ bars(csm.client) }}</div>
+   <div class="pn"><h3>Sex</h3>{{ bars(csm.sex) }}</div></div>
+  <div class="two eq">
+   <div class="pn"><h3>Age group</h3>{{ bars(csm.ages) }}</div>
+   <div class="pn"><h3>Service availed</h3>{{ bars(csm.services) }}</div></div>
+  <div class="pn"><h3>Citizen's Charter (CC)</h3>
+   <h4 style="color:var(--acc);margin:.2rem 0">CC1. Awareness of the CC</h4>{{ bars(csm.cc1) }}
+   <h4 style="color:var(--acc);margin:1.2rem 0 .2rem">CC2. Visibility of the CC</h4>{{ bars(csm.cc2) }}
+   <h4 style="color:var(--acc);margin:1.2rem 0 .2rem">CC3. Helpfulness of the CC</h4>{{ bars(csm.cc3) }}</div>
+  <div class="pn"><h3>Service Quality Dimensions (SQD) <span class="lg">percent of applicable answers · N/A is percent of all responses</span></h3>
+   <div class="tw"><table class="rt"><tr class="hr"><th>Item</th><th>Strongly Disagree</th><th>Disagree</th><th>Neither</th><th>Agree</th><th>Strongly Agree</th><th>N/A</th><th>Satisfied</th></tr>
+   {% for q in csm.sqd %}<tr class="dr"><td data-label="Item" class="wrap" style="min-width:260px"><b>SQD{{ q.i }}.</b> {{ q.text }}</td>{% for c in q.cells %}<td data-label="{{ c.label }}">{{ c.pct }}% <span class="mut">({{ c.n }})</span></td>{% endfor %}<td data-label="Satisfied"><b>{{ q.sat }}%</b></td></tr>{% endfor %}</table></div></div>
+  <div class="pn"><h3>Suggestions <span class="lg">Latest 50</span></h3>
+   {% for s in sugg %}<div class="sug">{{ s.text }}<small>{{ s.at }} · {{ s.service }}{% if s.email %} · {{ s.email }}{% endif %}</small></div>
+   {% else %}<div class="empty" style="padding:1rem">No written suggestions yet.</div>{% endfor %}</div>
+  {% else %}<div class="pn empty"><i class="fas fa-chart-pie" style="font-size:2.2rem"></i><p style="margin-top:1rem">No survey answers yet. Students and visitors answer the Client Satisfaction Survey on the Log In page.</p></div>{% endif %}</div>
  </div>
 """ + FOOTER + """
 </div>
@@ -2310,6 +2367,227 @@ gi.addEventListener('input',()=>{const q=gi.value.trim().toLowerCase();gr.innerH
 document.addEventListener('click',e=>{if(!e.target.closest('.gs'))gr.classList.remove('open')});
 </script></body></html>"""
 
+# ========== ORDER OF PAYMENT (Appendix 28) - editable form + print page ==========
+ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#003d1f">
+<title>Order of Payment — SLSU JGE Tagkawayan</title>""" + THEME_INIT + FA + """
+<style>{{ css|safe }}
+.oph{display:flex;align-items:center;justify-content:space-between;gap:.8rem 1rem;flex-wrap:wrap;padding:.8rem 1.4rem;background:var(--card);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:100}
+.oph .logo-group .logo-circle{width:44px;height:44px}
+.oph .acts{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center}
+.oph .btn{display:inline-flex;align-items:center;gap:.5rem}
+.opw{display:grid;grid-template-columns:minmax(300px,390px) minmax(0,1fr);gap:1.2rem;align-items:start;max-width:1700px;margin:0 auto;padding:1.4rem}
+.opw .card{margin-bottom:1rem}
+.opw .ct{margin-bottom:.9rem}
+.opw .form-group{margin-bottom:.9rem}
+.prev{overflow-x:auto;background:var(--card);border:1px solid var(--bd);border-radius:14px;box-shadow:var(--sh);padding:1rem}
+.copies{display:flex;gap:1.2rem;flex-wrap:wrap}
+.copies label{display:flex;align-items:center;gap:.4rem;margin:0;font-weight:500}
+.copies input{width:auto;min-height:0}
+/* ---- the printed sheet (always black on white) ---- */
+.sheet{display:grid;background:#fff;color:#000;border:1px solid #000;font-family:'Times New Roman',Times,serif;margin:0 auto}
+.opc{padding:10px 12px;border-right:1px solid #000;font-size:12px;line-height:1.35;min-width:0;display:flex;flex-direction:column}
+.opc:last-child{border-right:0}
+.opc p{margin:0}
+.opc .ap{text-align:center;font-style:italic;font-weight:700}
+.opc .cl{text-align:center;font-weight:700;margin-bottom:4px}
+.opc .hd{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #000;padding-bottom:3px}
+.opc .hd .r{text-align:right}
+.opc .ti{text-align:center;font-weight:700;font-size:1.2em;margin:10px 0 6px;letter-spacing:.5px}
+.opc .b{margin-top:9px}
+.opc .ln{border-bottom:1px solid #000;min-height:1.6em;text-align:center;font-weight:700;margin-top:2px;overflow-wrap:anywhere}
+.opc .cap{text-align:center;font-size:.85em}
+.opc table{width:100%;border-collapse:collapse;margin-top:4px;background:#fff}
+.opc th,.opc td{padding:2px 3px;font-size:1em;white-space:normal;background:#fff;color:#000;text-transform:none;letter-spacing:0;position:static;text-align:left;font-weight:400;border:0;border-bottom:1px solid #000}
+.opc th{text-align:center;text-decoration:underline;border-bottom:0}
+.opc td.am{text-align:right}
+.opc tr:hover td{background:#fff}
+.opc .tot td{font-weight:700;border-bottom:0}
+.opc .sg{margin-top:auto;padding-top:26px;text-align:center}
+.opc .sg b{display:block;text-decoration:underline}
+.opc .sg span{display:block;font-size:.9em}
+@page{size:A4 landscape;margin:8mm}
+@media print{
+ html,body{background:#fff!important}
+ .noprint,.bgblur{display:none!important}
+ .opw{display:block;padding:0;max-width:none}
+ .prev{overflow:visible;padding:0;border:0;box-shadow:none;background:#fff}
+ .sheet{min-width:0!important}
+ *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+@media(max-width:900px){.opw{grid-template-columns:1fr;padding:1rem}.oph{padding:.8rem 1rem}}
+</style></head><body>
+""" + BLUR_BG + """
+<header class="oph noprint">
+ <div class="logo-group">""" + LOGO_HTML + """<div class="logo-text"><h1>ORDER OF PAYMENT</h1><p>SLSU JGE Tagkawayan · Appendix 28</p></div></div>
+ <div class="acts">""" + THEME_BTN + """
+  <button type="button" class="btn" id="btnPrint"><i class="fas fa-print"></i> Print</button>
+  <button type="button" class="btn btn-ghost" id="btnReset"><i class="fas fa-eraser"></i> New order</button>
+  {% if is_admin %}<a class="btn btn-ghost" href="/admin"><i class="fas fa-arrow-left"></i> Admin</a>{% endif %}
+  <a class="btn btn-danger" href="/logout"><i class="fas fa-right-from-bracket"></i> Sign Out</a></div>
+</header>
+<div class="opw">
+ <div class="noprint">
+  <div class="card"><h3 class="ct"><i class="fas fa-list-check"></i> Pick a student request (optional)</h3>
+   <div class="form-group"><select id="f_appt"><option value="">-- Type everything yourself --</option>
+    {% for a in appts %}<option value="{{ loop.index0 }}">{{ a.name }} · {{ a.doc_raw }} ({{ a.when }})</option>{% endfor %}</select>
+    <p class="hint">Fills in the payor name, address and purpose from the student's appointment. You can still edit everything.</p></div></div>
+  <div class="card"><h3 class="ct"><i class="fas fa-pen-to-square"></i> Order of Payment details</h3>
+   <div class="g2"><div class="form-group"><label>Entity Name</label><input id="f_entity"></div>
+    <div class="form-group"><label>Fund Cluster</label><input id="f_fund"></div>
+    <div class="form-group"><label>Serial No.</label><input id="f_serial"></div>
+    <div class="form-group"><label>Date</label><input type="date" id="f_date"></div></div>
+   <div class="form-group"><label>Name of Payor</label><input id="f_payor" placeholder="LAST NAME, FIRST NAME MIDDLE NAME"></div>
+   <div class="form-group"><label>Address / Office of Payor</label><input id="f_addr"></div>
+   <div class="g2"><div class="form-group"><label>Amount (₱)</label><input type="number" id="f_amt" min="0" step="0.01" inputmode="decimal" placeholder="100.00"></div>
+    <div class="form-group"><label>Amount in words</label><input id="f_words" placeholder="Fills in by itself"></div></div>
+   <div class="form-group"><label>For payment of (Purpose)</label><input id="f_purpose" placeholder="e.g. CERT OF ENROLLMENT"></div></div>
+  <div class="card"><h3 class="ct"><i class="fas fa-building-columns"></i> Bank account/s</h3>
+   <div class="g3"><div class="form-group"><label>Bank</label><input id="f_bank"></div>
+    <div class="form-group"><label>No.</label><input id="f_acct"></div>
+    <div class="form-group"><label>Amount</label><input type="number" id="f_bamt" min="0" step="0.01" inputmode="decimal"></div>
+    <div class="form-group"><label>Bank 2</label><input id="f_bank2"></div>
+    <div class="form-group"><label>No. 2</label><input id="f_acct2"></div>
+    <div class="form-group"><label>Amount 2</label><input type="number" id="f_bamt2" min="0" step="0.01" inputmode="decimal"></div></div>
+   <div class="form-group"><label>Head of Accounting (printed name)</label><input id="f_signer"></div></div>
+  <div class="card"><h3 class="ct"><i class="fas fa-print"></i> Printing</h3>
+   <div class="copies"><label><input type="checkbox" id="c0" checked> Student's / Client's copy</label>
+    <label><input type="checkbox" id="c1" checked> Cashier's copy</label>
+    <label><input type="checkbox" id="c2" checked> COA's copy</label></div>
+   <label class="sw"><input type="checkbox" id="autoSerial" checked> Add 1 to the Serial No. after printing</label>
+   <p class="hint">Press <strong>Print</strong>, then choose your printer in the print window. Use <strong>Landscape</strong> paper. Bank, signer and address are remembered on this device.</p>
+   <button type="button" class="btn btn-full" id="btnPrint2" style="margin-top:.8rem"><i class="fas fa-print"></i> Print Order of Payment</button></div>
+ </div>
+ <div class="prev"><div class="sheet" id="sheet"></div></div>
+</div>
+<script>
+const APPTS={{ appts|tojson }},FEES={{ fees|tojson }},DEF={{ defs|tojson }},TODAY={{ today|tojson }};
+{% raw %}
+const $=id=>document.getElementById(id);
+const FIELDS=['entity','fund','serial','date','payor','addr','amt','words','purpose','bank','acct','bamt','bank2','acct2','bamt2','signer'];
+const SAVE=['entity','fund','addr','bank','acct','signer','serial'];
+const COPIES=["STUDENT'S/CLIENT'S COPY","CASHIER'S COPY","COA'S COPY"];
+const val=k=>$('f_'+k).value.trim();
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function money(n){return Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function fdate(v){if(!v)return '';const d=new Date(v+'T00:00');return isNaN(d)?'':d.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}
+const ONES=['','ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT','NINE','TEN','ELEVEN','TWELVE','THIRTEEN','FOURTEEN','FIFTEEN','SIXTEEN','SEVENTEEN','EIGHTEEN','NINETEEN'];
+const TENS=['','','TWENTY','THIRTY','FORTY','FIFTY','SIXTY','SEVENTY','EIGHTY','NINETY'];
+const SCALE=['',' THOUSAND',' MILLION',' BILLION'];
+function w3(n){let s='';if(n>=100){s+=ONES[Math.floor(n/100)]+' HUNDRED';n%=100;if(n)s+=' '}
+ if(n>=20){s+=TENS[Math.floor(n/10)];if(n%10)s+='-'+ONES[n%10]}else if(n)s+=ONES[n];return s}
+function words(n){n=Math.round(n*100)/100;if(!(n>0))return '';let p=Math.floor(n),c=Math.round((n-p)*100);const whole=p;const parts=[];let i=0;
+ if(!p)parts.push('ZERO');
+ while(p>0){const t=p%1000;if(t)parts.unshift(w3(t)+SCALE[i]);p=Math.floor(p/1000);i++}
+ let s=parts.join(' ')+(whole===1?' PESO':' PESOS');if(c)s+=' AND '+(c<10?'0':'')+c+'/100';return s+' ONLY'}
+function copyHTML(label,v){return '<div class="opc"><p class="ap">Appendix 28</p><p class="cl">'+label+'</p>'
+ +'<div class="hd"><div><p>Entity Name : <b>'+v.entity+'</b></p><p>Fund Cluster : <b>'+v.fund+'</b></p></div>'
+ +'<div class="r"><p>Serial No. : <b>'+v.serial+'</b></p><p><b>'+v.date+'</b></p></div></div>'
+ +'<p class="ti">ORDER OF PAYMENT</p>'
+ +'<p class="b">The Collecting Officer<br>Cash/Treasury Unit</p>'
+ +'<p class="b">Please issue Official Receipt in favor of</p><div class="ln">'+v.payor+'</div><p class="cap">(Name of Payor)</p>'
+ +'<div class="ln">'+v.addr+'</div><p class="cap">(Address/Office of Payor)</p>'
+ +'<p class="b">in the amount of</p><div class="ln">'+v.words+'</div>'
+ +'<p class="b">for payment of</p><div class="ln">'+v.purpose+'</div><p class="cap">(Purpose)</p>'
+ +'<p class="b">Please deposit the collections under Bank Account/s:</p>'
+ +'<table><tr><th>Name of Bank</th><th>No.</th><th>Amount</th></tr>'+v.rows+'<tr class="tot"><td colspan="2">Total</td><td class="am">'+v.total+'</td></tr></table>'
+ +'<div class="sg"><b>'+v.signer+'</b><span>Signature over Printed Name Head of Accounting</span><span>Division/Unit/Authorized Official</span></div></div>'}
+function render(){
+ const amt=parseFloat(val('amt'))||0,b1=parseFloat(val('bamt'))||0,b2=parseFloat(val('bamt2'))||0;
+ const w=val('words');
+ let rows='',n=0;
+ [[val('bank'),val('acct'),b1],[val('bank2'),val('acct2'),b2]].forEach(r=>{if(r[0]||r[1]||r[2]){n++;
+  rows+='<tr><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td><td class="am">'+(r[2]?money(r[2]):'')+'</td></tr>'}});
+ for(;n<4;n++)rows+='<tr><td>&nbsp;</td><td></td><td></td></tr>';
+ const v={entity:esc(val('entity')),fund:esc(val('fund')),serial:esc(val('serial')),date:esc(fdate(val('date'))),
+  payor:esc(val('payor')),addr:esc(val('addr')),words:amt>0?esc(w)+' ('+money(amt)+')':esc(w),purpose:esc(val('purpose')),
+  rows:rows,total:(b1+b2)>0?money(b1+b2):'',signer:esc(val('signer'))};
+ const on=[0,1,2].filter(i=>$('c'+i).checked);
+ const sh=$('sheet');sh.style.gridTemplateColumns='repeat('+Math.max(on.length,1)+',minmax(0,1fr))';
+ sh.style.width=(Math.max(on.length,1)/3*100)+'%';sh.style.minWidth=(Math.max(on.length,1)*300)+'px';
+ sh.innerHTML=on.map(i=>copyHTML(COPIES[i],v)).join('')}
+function saveDef(){try{const o={};SAVE.forEach(k=>o[k]=$('f_'+k).value);localStorage.setItem('op-defaults',JSON.stringify(o))}catch(e){}}
+function loadDef(){let o={};try{o=JSON.parse(localStorage.getItem('op-defaults')||'{}')}catch(e){}
+ FIELDS.forEach(k=>{$('f_'+k).value=''});
+ ['entity','fund','addr','bank','acct','signer'].forEach(k=>{$('f_'+k).value=o[k]||DEF[k]||''});
+ $('f_serial').value=o.serial||(TODAY.slice(0,4)+'-'+TODAY.slice(5,7)+'-001');
+ $('f_date').value=TODAY}
+let bankEdited=false;
+FIELDS.forEach(k=>$('f_'+k).addEventListener('input',()=>{
+ if(k==='amt'){$('f_words').value=words(parseFloat(val('amt'))||0);if(!bankEdited)$('f_bamt').value=val('amt')}
+ if(k==='bamt')bankEdited=true;
+ if(SAVE.includes(k))saveDef();render()}));
+[0,1,2].forEach(i=>$('c'+i).addEventListener('change',render));
+$('f_appt').addEventListener('change',()=>{const a=APPTS[$('f_appt').value];if(!a)return;
+ $('f_payor').value=a.name;$('f_purpose').value=a.doc;if(a.addr)$('f_addr').value=a.addr;
+ const fee=FEES[a.doc_raw];if(fee){$('f_amt').value=fee;$('f_words').value=words(fee);$('f_bamt').value=fee;bankEdited=false}
+ render()});
+$('btnReset').addEventListener('click',()=>{['payor','purpose','amt','words','bamt','bank2','acct2','bamt2'].forEach(k=>{$('f_'+k).value=''});
+ $('f_appt').value='';$('f_date').value=TODAY;bankEdited=false;render()});
+function doPrint(){render();window.print()}
+$('btnPrint').addEventListener('click',doPrint);$('btnPrint2').addEventListener('click',doPrint);
+window.addEventListener('afterprint',()=>{if(!$('autoSerial').checked)return;
+ const s=$('f_serial'),m=s.value.match(/([0-9]+)([^0-9]*)$/);
+ if(m){const nx=String(parseInt(m[1],10)+1).padStart(m[1].length,'0');s.value=s.value.slice(0,m.index)+nx+m[2];saveDef();render()}});
+""" + THEME_JS + """
+loadDef();render();
+{% endraw %}
+</script></body></html>"""
+
+# ========== SURVEY SUMMARY (percentages for the admin) ==========
+def _pct(n, t):
+    return round(100.0 * n / t, 1) if t else 0
+
+
+def csm_summary():
+    rows = [f['csm'] for f in feedback_db if f.get('csm')]
+    n = len(rows)
+
+    def dist(key, labels):
+        cnt = {}
+        for r in rows:
+            k = str(r.get(key))
+            cnt[k] = cnt.get(k, 0) + 1
+        return [dict(label=l, n=cnt.get(v, 0), pct=_pct(cnt.get(v, 0), n)) for v, l in labels]
+
+    bands = [('Under 18', 0, 17), ('18 - 24', 18, 24), ('25 - 34', 25, 34), ('35 - 49', 35, 49), ('50 and above', 50, 200)]
+    ages = []
+    for l, lo, hi in bands:
+        c = sum(1 for r in rows if lo <= int(r.get('age') or 0) <= hi)
+        ages.append(dict(label=l, n=c, pct=_pct(c, n)))
+    svc = {}
+    for r in rows:
+        svc[r.get('service', '')] = svc.get(r.get('service', ''), 0) + 1
+    services = [dict(label=k, n=v, pct=_pct(v, n)) for k, v in sorted(svc.items(), key=lambda x: -x[1])]
+    names = ['Strongly Disagree', 'Disagree', 'Neither Agree nor Disagree', 'Agree', 'Strongly Agree']
+    sqd, tot_app, tot_sat, tot_sum = [], 0, 0, 0
+    for i, text in enumerate(CSM_SQD):
+        vals = [(r.get('sqd') or [])[i] for r in rows if len(r.get('sqd') or []) > i]
+        app = [int(v) for v in vals if v != 'NA']
+        na = len(vals) - len(app)
+        cells = [dict(label=names[k - 1], n=app.count(k), pct=_pct(app.count(k), len(app))) for k in range(1, 6)]
+        cells.append(dict(label='N/A', n=na, pct=_pct(na, n)))
+        sat = sum(1 for v in app if v >= 4)
+        tot_app += len(app)
+        tot_sat += sat
+        tot_sum += sum(app)
+        sqd.append(dict(i=i, text=text, cells=cells, sat=_pct(sat, len(app))))
+    return dict(
+        n=n,
+        client=dist('client_type', [(c, c) for c in CSM_CLIENT]),
+        sex=dist('sex', [('Male', 'Male'), ('Female', 'Female')]),
+        ages=ages, services=services,
+        cc1=dist('cc1', [('1', "1. Knows what a CC is and saw this office's CC"),
+                         ('2', "2. Knows what a CC is but did NOT see this office's CC"),
+                         ('3', '3. Learned of the CC only when seeing this office\'s CC'),
+                         ('4', '4. Does not know what a CC is and did not see one')]),
+        cc2=dist('cc2', [('1', 'Easy to see'), ('2', 'Somewhat easy to see'), ('3', 'Difficult to see'),
+                         ('4', 'Not visible at all'), ('5', 'N/A')]),
+        cc3=dist('cc3', [('1', 'Helped very much'), ('2', 'Somewhat helped'), ('3', 'Did not help'), ('4', 'N/A')]),
+        sqd=sqd, overall=_pct(tot_sat, tot_app), avg=round(tot_sum / tot_app, 2) if tot_app else 0)
+
+
 # ========== ROUTES ==========
 @app.before_request
 def auto_sweep():
@@ -2319,16 +2597,22 @@ def auto_sweep():
 
 @app.before_request
 def protect_routes():
-    if request.endpoint in ('static', 'reg_status', 'forgot', 'forgot_verify', 'forgot_resend', 'forgot_new'):
+    ep = request.endpoint
+    if ep in ('static', 'reg_status', 'forgot', 'forgot_verify', 'forgot_resend', 'forgot_new', 'survey_submit'):
         return
-    if request.endpoint in ('home', 'login', 'register'):
+    if ep in ('home', 'login', 'register'):
         if session.get('email'):
-            return redirect('/admin' if session['email'] == ADMIN_EMAIL else '/dashboard')
+            return redirect(home_for(session['email']))
         return
-    if not session.get('email'):
+    em = session.get('email')
+    if not em:
         return redirect('/')
-    if request.path.startswith('/admin') and session['email'] != ADMIN_EMAIL:
-        return redirect('/dashboard')
+    if request.path.startswith('/admin') and em != ADMIN_EMAIL:
+        return redirect(home_for(em))
+    if request.path.startswith('/orderpay') and em not in (ADMIN_EMAIL, OP_EMAIL):
+        return redirect(home_for(em))
+    if em == OP_EMAIL and not request.path.startswith('/orderpay') and ep not in ('logout',):
+        return redirect('/orderpay')
 
 
 @app.errorhandler(413)
@@ -2381,6 +2665,10 @@ def login():
         session.pop('pending_email', None)
         session.update(email=ADMIN_EMAIL, fullname='Administrator', studentid='ADMIN')
         return redirect('/admin')
+    if key == OP_EMAIL.lower() and pw == OP_PASSWORD:
+        session.pop('pending_email', None)
+        session.update(email=OP_EMAIL, fullname='Order of Payment', studentid='ORDERPAY')
+        return redirect('/orderpay')
 
     e = find_user(key)
     if e and check_password_hash(approved_users[e]['password'], pw):
@@ -2452,8 +2740,8 @@ def register():
 
 @app.route('/dashboard')
 def dashboard():
-    if session['email'] == ADMIN_EMAIL:
-        return redirect('/admin')
+    if session['email'] in (ADMIN_EMAIL, OP_EMAIL):
+        return redirect(home_for(session['email']))
     me = approved_users.get(session['email'])
     if me is None:                      # stale session (e.g. account removed)
         session.clear()
@@ -2549,14 +2837,13 @@ def change_password():
     return redirect('/dashboard#profile')
 
 
-@app.route('/feedback', methods=['POST'])
-def feedback():
-    """Client Satisfaction Measurement (form SP-SLSU-8.0F1)."""
-    me = approved_users.get(session['email'])
-    if me is None:
-        return redirect('/')
+@app.route('/survey', methods=['POST'])
+def survey_submit():
+    """Client Satisfaction Measurement (form SP-SLSU-8.0F1), answered on the Log In page without logging in."""
     g = lambda k: request.form.get(k, '').strip()
-    back = '/dashboard#feedback'
+    if time.time() - session.get('last_survey', 0) < 20:
+        flash("Please wait a few seconds before sending another survey.", 'error')
+        return redirect('/')
     client, sex, region, service = g('client_type'), g('sex'), g('region')[:80], g('service')[:190]
     try:
         age = int(g('age'))
@@ -2564,28 +2851,32 @@ def feedback():
         age = 0
     if client not in CSM_CLIENT or sex not in ('Male', 'Female') or not region or not service or not 1 <= age <= 120:
         flash("Please complete client type, sex, age, region and the service you availed.", 'error')
-        return redirect(back)
+        return redirect('/')
     cc1 = g('cc1')
     if cc1 not in ('1', '2', '3', '4'):
-        flash("Please answer CC1.", 'error'); return redirect(back)
+        flash("Please answer CC1.", 'error')
+        return redirect('/')
     cc2, cc3 = ('5', '4') if cc1 == '4' else (g('cc2'), g('cc3'))
     if cc2 not in ('1', '2', '3', '4', '5') or cc3 not in ('1', '2', '3', '4'):
-        flash("Please answer CC2 and CC3.", 'error'); return redirect(back)
+        flash("Please answer CC2 and CC3.", 'error')
+        return redirect('/')
     sqd = [g(f'sqd{i}') for i in range(len(CSM_SQD))]
     if any(v not in ('1', '2', '3', '4', '5', 'NA') for v in sqd):
-        flash("Please answer every SQD question (choose N/A if it does not apply).", 'error'); return redirect(back)
+        flash("Please answer every SQD question (choose N/A if it does not apply).", 'error')
+        return redirect('/')
     nums = [int(v) for v in sqd if v != 'NA']
     rating = round(sum(nums) / len(nums)) if nums else 3
     sug, mail = g('suggestions')[:1000], g('email')[:120]
     control = 'CSM-' + datetime.now().strftime('%Y%m%d') + '-' + uuid.uuid4().hex[:5].upper()
     feedback_db.append(dict(
-        name=session['fullname'], studentid=session['studentid'], category='Client Satisfaction', rating=rating,
+        name='Anonymous', studentid='', category='Client Satisfaction', rating=rating,
         message=f"[{service}] {sug or 'No suggestions'} (Control No. {control})",
         at=datetime.now().strftime('%Y-%m-%d %H:%M'),
         csm=dict(control=control, client_type=client, sex=sex, age=age, region=region, service=service,
                  cc1=cc1, cc2=cc2, cc3=cc3, sqd=sqd, suggestions=sug, email=mail)))
-    flash("✅ Thank you! Your feedback was submitted.", 'ok')
-    return redirect(back)
+    session['last_survey'] = time.time()
+    flash("✅ Thank you! Your survey was submitted.", 'ok')
+    return redirect('/')
 
 
 @app.route('/book', methods=['POST'])
@@ -2657,6 +2948,24 @@ def _when(ts):
         return ''
 
 
+@app.route('/orderpay')
+def orderpay():
+    """Order of Payment interface (Appendix 28): editable form, live preview and printing."""
+    appts = []
+    for e, lst in appointments_db.items():
+        u = approved_users.get(e, {})
+        for a in lst:
+            if a['status'] == 'Pending':
+                appts.append(dict(name=a['fullname'].upper(), doc=a['document'].upper(), doc_raw=a['document'],
+                                  when=f"{a['sched_label']} · {a['sched_time']}", addr=(u.get('address') or '').upper(),
+                                  key=slot_key(a)))
+    appts.sort(key=lambda x: x['key'])
+    for x in appts:
+        x.pop('key')
+    return render(ORDERPAY_TPL, appts=appts, fees=DOC_FEES, defs=OP_DEFAULTS,
+                  is_admin=session['email'] == ADMIN_EMAIL)
+
+
 @app.route('/admin')
 def admin_dashboard():
     st = lambda a: approved_users.get(a.get('email'), {})
@@ -2707,12 +3016,17 @@ def admin_dashboard():
     ev.sort(key=lambda x: x[0], reverse=True)
     activity = [dict(icon=i, cls=c, title=t, sub=s_, when=_when(ts)) for ts, i, c, t, s_ in ev[:6]]
 
+    sugg = [dict(at=f['at'], text=f['csm'].get('suggestions'), email=f['csm'].get('email'),
+                 service=f['csm'].get('service', ''))
+            for f in reversed(feedback_db) if f.get('csm') and f['csm'].get('suggestions')][:50]
+
     return render(ADMIN_TPL, pending=pending_accounts, total_pending=len(pending_accounts),
                   total_approved=len(approved_users), all_count=len(active), archive_count=len(archive),
                   missed_count=len(missed), active_groups=group_cy(active), archive_groups=group_cy(archive),
                   missed_groups=group_cy(missed), approved_groups=group_cy(people), restricted=restricted,
                   recent=recent, profiles=profiles, chart=chart, donut=donut, activity=activity,
-                  feedback=feedback_db[::-1], mail_on=mail_ready(), mail_err=MAIL_STATE['last_error'])
+                  csm=csm_summary(), sugg=sugg,
+                  mail_on=mail_ready(), mail_err=MAIL_STATE['last_error'])
 
 
 def find_appt(aid):
@@ -2951,7 +3265,7 @@ def forgot_new():
 
 @app.route('/notifications/read', methods=['POST'])
 def read_notifications():
-    """Opening the notifications page marks everything as read, so the red number disappears (and stays gone)."""
+    """Opening the notifications page marks everything as read."""
     me = approved_users.get(session['email'])
     if me is not None:
         me['notif_read'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -2984,6 +3298,7 @@ def logout():
 if __name__ == '__main__':
     print("SLSU JGE TAGKAWAYAN — Registrar Appointment System")
     print(f"Admin login: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
+    print(f"Order of Payment login: {OP_EMAIL} / {OP_PASSWORD}")
     if mail_ready():
         print(f"[MAIL] ready: {SMTP_USER} via {SMTP_HOST}:{SMTP_PORT}  (used only for forgot-password codes)")
     else:
