@@ -1,3 +1,17 @@
+"""
+SLSU JGE Tagkawayan - Registrar Appointment System
+==================================================
+Single-file Flask application:
+  * Student portal   (/dashboard)  - document requests, notifications page, profile
+  * Admin dashboard  (/admin)      - requests, archive, accounts, survey results
+  * Cashier page     (/orderpay)   - Order of Payment (Appendix 28), fees, transaction history (PDF/CSV/JSON)
+
+Run:   pip install flask flask-sqlalchemy reportlab
+       python app.py
+Optional services (environment variables):
+  SEMAPHORE_API_KEY, SMS_SENDER                     -> text-message codes (forgot password)
+  SMTP_USER, SMTP_PASSWORD (+ SMTP_HOST/SMTP_PORT)  -> e-mailed codes (Gmail app password)
+"""
 import calendar
 import hashlib
 import hmac
@@ -22,7 +36,6 @@ from datetime import datetime, date, timedelta
 from flask import (Flask, render_template_string, request, session, redirect,
                    flash, jsonify, send_file, abort)
 from werkzeug.security import generate_password_hash, check_password_hash
-from markupsafe import escape
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'slsu-jge-tagkawayan-2026-change-me')
@@ -32,10 +45,10 @@ AVATAR_MAX = 3 * 1024 * 1024                            # profile photo limit (3
 SCAN_MAX = 4 * 1024 * 1024                              # one scanned page (4 MB)
 
 # ========== CONFIG ==========
-LOGO_URL = "/static/JGE_LOGO.png"          # put your logo at static/JGE.jpg
-BACKGROUND_URL = "/static/Office.jpg" # login page background photo: static/Office.jpg
-BANNER_URL = "/static/bannerjge.png"  # rectangular photo on the home page (falls back to Office.jpg)
-ABOUT_BANNER_URL = "/static/Fronts.jpg" # rectangular photo on top of About Us (falls back to Banner.jpg, then Office.jpg)
+LOGO_URL = "/static/JGE_LOGO.png"          # logo: static/JGE_LOGO.png
+BACKGROUND_URL = "/static/Office.jpg"      # login page background photo
+BANNER_URL = "/static/bannerjge.png"       # rectangular photo on the home page (falls back to Office.jpg)
+ABOUT_BANNER_URL = "/static/Fronts.jpg"    # rectangular photo on top of About Us
 AVATAR_DIR = os.path.join(app.static_folder, 'avatars')   # uploaded profile pictures
 os.makedirs(AVATAR_DIR, exist_ok=True)
 SCAN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scans')   # scanned documents (private)
@@ -43,7 +56,7 @@ os.makedirs(SCAN_DIR, exist_ok=True)
 FLASH_MS = 2500                        # notifications disappear after this many milliseconds
 ADMIN_EMAIL = 'admin@slsu.edu.ph'
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')   # change in production
-# Order of Payment account: sees ONLY the Order of Payment interface (the admin can open it too)
+# Order of Payment account: the ONLY account that can open the Order of Payment interface
 OP_EMAIL = 'orderpay@slsu.edu.ph'
 OP_PASSWORD = os.environ.get('OP_PASSWORD', 'order123')         # change in production
 # Default values of the Order of Payment form (all of them can be edited on the page)
@@ -54,7 +67,6 @@ DOC_FEES = {}            # optional starting fee per document, e.g. {"Certificat
 OP_SERIAL_START = int(os.environ.get('OP_SERIAL_START', 1))     # first serial number when no order exists yet
 PAYMENT_QR_URL = "/static/payment_qr.png"       # the cashier's QR code picture shown to students (optional)
 PAYMENT_APPS = "GCash, Maya, a bank app or any QR Ph payment app"
-SERVICES_IMG = "/static/Services.jpg"           # picture: "Guidelines on the 7/14/30 days processing time"
 # Documents that must be scanned first so the registrar can print and authorize them
 AUTH_DOCS = ["Certification, Authentication & Verification (CAV)", "Notarization of Documents",
              "Certified True Copy of COR", "Duplicate / Replacement Diploma & TOR"]
@@ -83,10 +95,11 @@ COURSES = [
     "Bachelor of Secondary Education major in English",
     "Bachelor of Secondary Education major in Mathematics",
     "Bachelor of Secondary Education major in Science",
-
     "Bachelor of Science in Fisheries and Aquatic Science",
 ]
 YEARS = ["1st Year", "2nd Year", "3rd Year", "4th Year", "5th Year", "Graduated / Alumni", "Others"]
+YEARS_COVERED = YEARS[:5]               # year levels a student can ask records for
+SEMESTERS = ["1st Semester", "2nd Semester"]
 PAYMENTS = ["SLSU JGE Campus Cashier (QR code / online payment app)"]
 LHS = "Laboratory High School"           # students of the campus Laboratory High School can also use the portal
 GRADES = ["Grade 7", "Grade 8", "Grade 9", "Grade 10"]
@@ -96,15 +109,20 @@ SERVICES = {
                          "Summary of Grades", "True Copy of Grades",
                          "Certificate of Academic Standing"],
     "Transfer & Clearance": ["Honorable Dismissal / Transfer Credentials", "Cross-Enrollment Permit",
-                             "Subject Equivalency & Credit", "Graduation Clearance", "Graduation Eligibility", "Medium of Instruction", "Good Moral Character Certificate"],
+                             "Subject Equivalency & Credit", "Graduation Clearance", "Graduation Eligibility",
+                             "Medium of Instruction", "Good Moral Character Certificate"],
     "Verification & Authentication": ["Certification, Authentication & Verification (CAV)",
-                                      "Notarization of Documents", "Certified True Copy of COR", "Duplicate / Replacement Diploma & TOR"],
+                                      "Notarization of Documents", "Certified True Copy of COR",
+                                      "Duplicate / Replacement Diploma & TOR"],
     "Administrative": ["Correction of Name / Records", "Change of Matriculation",
                        "Leave of Absence", "Curriculum / Program of Study"],
 }
 DOCS = [d for items in SERVICES.values() for d in items]
+# Documents that need the student to specify the semester, school year, year level and course.
+SEM_DOCS = ["Summary of Grades", "True Copy of Grades", "Certificate of Academic Standing",
+            "Certified True Copy of COR", "Change of Matriculation", "Leave of Absence"]
 TIMES = ["09:00 AM – 10:00 AM", "10:00 AM – 11:00 AM", "11:00 AM – 12:00 NN", "12:00 NN – 01:00 PM",
-         "01:00 PM – 02:00 PM", "02:00 PM – 03:00 PM", "03:00 PM – 04:00 PM",  "04:00 PM – 05:00 PM"]
+         "01:00 PM – 02:00 PM", "02:00 PM – 03:00 PM", "03:00 PM – 04:00 PM", "04:00 PM – 05:00 PM"]
 # Requirements reminder shown when booking (and in Help). Strings = one item; dict = item with sub-items.
 REQUIREMENTS = [
     "Valid school ID / Government ID",
@@ -117,9 +135,9 @@ REQUIREMENTS = [
         "ID/library card return (if graduating/transferring)"]),
     "1×1 or 2×2 ID photos (as required)",
 ]
+SPEC_LINE = "Semester, school year, year level and course - choose them in the form"
 # IMPORTANT requirements per document (shown highlighted when a student picks that document).
-# DRAFT: please edit to match the Registrar's Office official requirements. A document without an entry
-# only shows the general list above.
+# DRAFT: please edit to match the Registrar's Office official requirements.
 DOC_REQUIREMENTS = {
     "Transcript of Records (TOR)": [
         "Fully signed clearance (library, department/campus, finance/accounting)",
@@ -131,13 +149,15 @@ DOC_REQUIREMENTS = {
         "Official receipt of the diploma fee"],
     "Summary of Grades": [
         "Valid school ID (you can only request your own record)",
+        SPEC_LINE,
         "Official receipt of the processing fee"],
     "True Copy of Grades": [
         "Valid school ID",
-        "Official receipt of the processing fee",
-        "Semester / school year needed - write it in the comments"],
+        SPEC_LINE,
+        "Official receipt of the processing fee"],
     "Certificate of Academic Standing": [
         "Valid school ID",
+        SPEC_LINE,
         "Purpose of the request - write it in the comments"],
     "Honorable Dismissal / Transfer Credentials": [
         "Fully signed clearance with no unpaid balance",
@@ -173,7 +193,7 @@ DOC_REQUIREMENTS = {
         "Valid government ID"],
     "Certified True Copy of COR": [
         "Valid school ID",
-        "Semester / school year of the COR - write it in the comments",
+        SPEC_LINE,
         "Official receipt of the fee"],
     "Duplicate / Replacement Diploma & TOR": [
         "Notarized affidavit of loss",
@@ -185,23 +205,73 @@ DOC_REQUIREMENTS = {
         "Supporting documents that show the correct entry"],
     "Change of Matriculation": [
         "Approval from your Dean / Department head",
-        "Copy of your current Certificate of Registration (COR)"],
+        "Copy of your current Certificate of Registration (COR)",
+        SPEC_LINE],
     "Leave of Absence": [
         "Approved leave of absence form / letter signed by your Dean",
-        "Clearance from the Finance/Accounting office"],
+        "Clearance from the Finance/Accounting office",
+        SPEC_LINE],
     "Curriculum / Program of Study": [
         "Valid school ID",
         "Program and curriculum year - write them in the comments"],
 }
-# Attendance policy: a Pending appointment whose date has passed becomes "Missed" (removed from active lists).
-MISS_LIMIT = 10**9   # booking restriction removed;                  # missed appointments before the account is restricted
-RESTRICT_MONTHS = 0            # how long booking is locked
+# Attendance policy (switched off): kept so old records still work.
+MISS_LIMIT = 10**9
+RESTRICT_MONTHS = 0
 MIN_AGE_COLLEGE, MIN_AGE_LHS = 16, 11
-CONTACT_EMAIL = "registrar.jge@slsu.edu.ph"      # registrar email, e.g. "registrar.jge@slsu.edu.ph"  (fill in)
-CONTACT_FACEBOOK = "https://www.facebook.com/registrar.slsujge"   # full link of the registrar Facebook page, e.g. "https://www.facebook.com/registrar.slsujge"  (fill in)
+CONTACT_EMAIL = "registrar.jge@slsu.edu.ph"
+CONTACT_FACEBOOK = "https://www.facebook.com/registrar.slsujge"
 CONTACT_ADDRESS = "Brgy. Rizal, Tagkawayan, Quezon"
 CONTACT_PHONE = "09123456789"      # optional
 OFFICE_DAYS = "Monday to Friday, 08:00 AM – 05:00 PM · NO NOON TIME BREAK. Closed on weekends and holidays."
+
+# Services page: copy of the "Office of the Campus Registrar" guidelines poster.
+PROCESSING = [
+    dict(days="7 DAYS",
+         covers=["Authentication of documents (TOR, Official Registration Form, etc.) not more than 10 sets",
+                 "CAV", "Certifications (Enrolment, CAR, ...)", "Copy for ... TOR", "Form 137 (HS)"],
+         rule="i.e. date of request + 7 days",
+         eg=["date of request: 8th day of the month", "claim date: 15th day of the month"]),
+    dict(days="14 DAYS",
+         covers=["Transfer credentials of student who had graduated", "Second copy of TOR and CWA",
+                 "Authentication of document/s (more than 10 sets)"],
+         rule="i.e. date of request + 14 days",
+         eg=["date of request: 5th day of the month", "claim date: 19th day of the month"]),
+    dict(days="30 DAYS",
+         covers=["Graduation credentials (i.e. TOR & Certificate of Graduation)", "CWA", "Second Copy of Diploma",
+                 "Multiple requests (i.e. requesting for several documents) e.g. PD 907 documents",
+                 "Evaluation/Accounting of student's academic standing",
+                 "Transfer credential of undergraduate student"],
+         rule="i.e. date of request + 30 days",
+         eg=["date of request: 1st day of the month", "claim date: 1st day of the following month"],
+         footnote="*If request month has only 30 days then claim date is the same date of the following month, "
+                  "and if request month has 31 days then claim date is the date of request minus one (1) day of "
+                  "the following month.",
+         eg2=["e.g. date of request: January 25", "claim date: February 24"]),
+]
+PROCESSING_NOTES = [
+    "If the \"claim date\" falls on a holiday then \"claim date\" shall be on the next working day following the holiday/s.",
+    "If the \"claim date\" falls on a Saturday/Sunday then \"claim date\" shall be on Monday following said Saturday & Sunday.",
+]
+EXPRESS = dict(
+    fee="Php 300",
+    rows=[
+        dict(time="Within the day",
+             covers=["Authentication of documents (not more than 6 sets)", "Second Copy of TOR",
+                     "Certification of Enrolment", "Certification of Units Earned",
+                     "Transfer Credentials of student who had graduated"],
+             bullets=["Filing of request done before 11 o'clock a.m.",
+                      "Releasing time between 4 o'clock & 5 o'clock p.m.",
+                      "The University Registrar is at the office"],
+             note=""),
+        dict(time="Within 7 days",
+             covers=["Authentication of documents (more than 6 sets)",
+                     "First copy of an undergraduate TOR (i.e. have not graduated)",
+                     "Transfer Credentials of undergraduate student",
+                     "CWA of a student who had graduated"],
+             bullets=[],
+             note="NOTE: OUR will only cater to a maximum of 12 requests/day"),
+    ])
 
 # Home page: Office of the University Registrar
 UNIV = dict(
@@ -286,7 +356,7 @@ ABOUT = dict(
              "from a phone or computer, while registrar staff see who is coming, when and for what."],
 )
 
-# SLSU Quality Policy (Revision 5, effective March 8, 2024) - English and Filipino, shown under More > Quality Policy.
+# SLSU Quality Policy (Revision 5, effective March 8, 2024) - English and Filipino.
 QUALITY = dict(
     en_intro=("The University as an excellent academic hub commits to develop a sustained culture of delivering "
               "quality service and undertaking continuous innovations in instruction and relevant curricular "
@@ -454,6 +524,26 @@ def is_restricted(u):
     return False        # the 3-month booking restriction was removed
 
 
+def school_years(span=12):
+    """['2026-2027', '2025-2026', ...] newest first (a school year starts in June)."""
+    t = date.today()
+    start = t.year if t.month >= 6 else t.year - 1
+    return [f"{y}-{y + 1}" for y in range(start, start - span, -1)]
+
+
+def valid_school_year(sy):
+    m = re.fullmatch(r'(\d{4})-(\d{4})', sy or '')
+    return bool(m and int(m.group(2)) == int(m.group(1)) + 1 and 1990 <= int(m.group(1)) <= date.today().year + 1)
+
+
+def spec_text(sem, sy, ycov, ccov):
+    """'1st Semester · S.Y. 2025-2026 · 3rd Year · BSIT-CPT' (shown beside the document name)."""
+    parts = [sem, f"S.Y. {sy}", ycov]
+    if ccov:
+        parts.append(COURSE_CODES.get(ccov, ccov))
+    return ' · '.join(p for p in parts if p)
+
+
 def sweep_missed():
     """(Old rule) Pending appointments whose day has passed become Missed. Switched off with AUTO_MISSED."""
     if not AUTO_MISSED:
@@ -529,20 +619,6 @@ def delete_avatar(url):
             pass
 
 
-def account_activated():
-    """True while this browser registered an account that the admin has since approved and the student
-    has not logged in yet. The login page shows a reminder for as long as this is True."""
-    pe = session.get('pending_email')
-    return bool(pe and pe in approved_users)
-
-
-def account_waiting():
-    """True while this browser registered an account that is still waiting for the admin's approval.
-    The login page then reminds the student to try again later."""
-    pe = session.get('pending_email')
-    return bool(pe and pe in pending_accounts)
-
-
 def home_for(email):
     """Where each kind of account lands after logging in."""
     if email == ADMIN_EMAIL:
@@ -565,6 +641,11 @@ def mask_phone(s):
     return (d[:4] + '*****' + d[-2:]) if d else ''
 
 
+def mask_email(e):
+    local, _, dom = (e or '').partition('@')
+    return (local[:2] + '*' * max(len(local) - 2, 2) + '@' + dom) if dom else ''
+
+
 def find_user_by_phone(num):
     for e, u in approved_users.items():
         if num and norm_phone(u.get('contact')) == num:
@@ -582,14 +663,15 @@ def phone_taken(num, except_email=None):
 def render(tpl, **kw):
     return render_template_string(tpl, css=CSS, logo=LOGO_URL, bg=BACKGROUND_URL, banner=BANNER_URL,
                                   about_banner=ABOUT_BANNER_URL, about=ABOUT, univ=UNIV, quality=QUALITY,
-                                  cemail=CONTACT_EMAIL,
-                                  cfb=CONTACT_FACEBOOK, caddr=CONTACT_ADDRESS, cdays=OFFICE_DAYS,
-                                  cphone=CONTACT_PHONE, flash_ms=FLASH_MS, courses=COURSES, years=YEARS,
-                                  payments=PAYMENTS, times=TIMES, docs=DOCS, services=SERVICES, grades=GRADES, lhs=LHS,
-                                  reqs=REQUIREMENTS, doc_reqs=DOC_REQUIREMENTS, map_q=quote_plus(MAP_QUERY), csm_sqd=CSM_SQD,
-                                  today=date.today().isoformat(), activated=account_activated(),
-                                  waiting=account_waiting(), acss=ADMIN_CSS, pay_qr=PAYMENT_QR_URL, pay_apps=PAYMENT_APPS,
-                                  auth_docs=AUTH_DOCS, svc_img=SERVICES_IMG, max_pages=MAX_SCAN_PAGES,
+                                  cemail=CONTACT_EMAIL, cfb=CONTACT_FACEBOOK, caddr=CONTACT_ADDRESS,
+                                  cdays=OFFICE_DAYS, cphone=CONTACT_PHONE, flash_ms=FLASH_MS, courses=COURSES,
+                                  years=YEARS, years_cov=YEARS_COVERED, semesters=SEMESTERS, sem_docs=SEM_DOCS,
+                                  school_years=school_years(), payments=PAYMENTS, times=TIMES, docs=DOCS,
+                                  services=SERVICES, grades=GRADES, lhs=LHS, reqs=REQUIREMENTS,
+                                  doc_reqs=DOC_REQUIREMENTS, map_q=quote_plus(MAP_QUERY), csm_sqd=CSM_SQD,
+                                  today=date.today().isoformat(), acss=ADMIN_CSS, pay_qr=PAYMENT_QR_URL,
+                                  pay_apps=PAYMENT_APPS, auth_docs=AUTH_DOCS, max_pages=MAX_SCAN_PAGES,
+                                  proc=PROCESSING, proc_notes=PROCESSING_NOTES, express=EXPRESS,
                                   ST=dict(prep=ST_PREP, unpaid=ST_UNPAID, paid=ST_PAID, proc=ST_PROC, ready=ST_READY),
                                   **kw)
 
@@ -751,59 +833,112 @@ def persist():
 init_db()
 
 
-# ========== SMS (account activation notice + forgot-password code) ==========
-# Codes are sent to the student's CONTACT NUMBER by text message through Semaphore (a Philippine SMS service).
-#   1. Create an account at https://semaphore.co and copy your API key.
-#   2. Set it before starting the server:
-#        Windows CMD :  set SEMAPHORE_API_KEY=yourkey          PowerShell: $env:SEMAPHORE_API_KEY="yourkey"
-#        Linux / Mac :  export SEMAPHORE_API_KEY=yourkey
-#      Optional: SMS_SENDER (sender name, default SLSUJGE).
-# Without an API key the text message (including the reset code) is printed in the terminal instead.
+# ========== MESSAGING: SMS (Semaphore) + E-MAIL (Gmail SMTP) ==========
+# Forgot-password codes are sent to the student's contact number by text message AND/OR to the student's Gmail,
+# depending on which service is set up. Set the variables below before starting the server.
+#
+# 1) Text message (Philippine SMS service Semaphore, https://semaphore.co)
+#      Windows CMD :  set SEMAPHORE_API_KEY=yourkey          PowerShell: $env:SEMAPHORE_API_KEY="yourkey"
+#      Linux / Mac :  export SEMAPHORE_API_KEY=yourkey          (optional: SMS_SENDER, default SLSUJGE)
+# 2) E-mail (Gmail): turn on 2-step verification, create an "App password" at
+#      https://myaccount.google.com/apppasswords then set
+#      SMTP_USER=youraddress@gmail.com   SMTP_PASSWORD=the16letterapppassword
+#      (optional: SMTP_HOST=smtp.gmail.com  SMTP_PORT=465  MAIL_FROM_NAME)
+# With neither set, the code is printed in the terminal (development only).
 SEMAPHORE_API_KEY = (os.environ.get('SEMAPHORE_API_KEY') or '').strip()
 SMS_SENDER = (os.environ.get('SMS_SENDER') or 'SLSUJGE').strip()
 SMS_STATE = dict(last_error='', last_ok='')
+SMTP_HOST = (os.environ.get('SMTP_HOST') or 'smtp.gmail.com').strip()
+SMTP_PORT = int(os.environ.get('SMTP_PORT') or 465)
+SMTP_USER = (os.environ.get('SMTP_USER') or '').strip()
+SMTP_PASSWORD = (os.environ.get('SMTP_PASSWORD') or '').replace(' ', '')
+MAIL_FROM_NAME = os.environ.get('MAIL_FROM_NAME') or 'SLSU JGE Registrar'
+MAIL_STATE = dict(last_error='', last_ok='')
 
 
 def sms_ready():
     return bool(SEMAPHORE_API_KEY)
 
 
+def email_ready():
+    return bool(SMTP_USER and SMTP_PASSWORD)
+
+
 def send_sms_now(number, text):
     """Send one text message right now. Returns (ok, error_message)."""
     if not sms_ready():
         print(f"\n[SMS not sent - SMS is not set up (SEMAPHORE_API_KEY missing)]\nTo: {number}\n{text}\n")
-        return False, "SMS is not set up yet. Set SEMAPHORE_API_KEY (see the SMS section of the code)."
+        return False, "SMS is not set up yet."
     try:
         data = urllib.parse.urlencode(dict(apikey=SEMAPHORE_API_KEY, number=number, message=text,
                                            sendername=SMS_SENDER)).encode()
         req = urllib.request.Request('https://api.semaphore.co/api/v4/messages', data=data)
         with urllib.request.urlopen(req, timeout=20) as r:
             ok = 200 <= r.status < 300
+            status = r.status
         if ok:
-            SMS_STATE.update(last_ok=datetime.now().strftime('%Y-%m-%d %H:%M:%S'), last_error='')
+            SMS_STATE.update(last_ok=now_s(), last_error='')
             print(f"[SMS] sent to {number}")
             return True, ''
-        SMS_STATE['last_error'] = f"HTTP {r.status}"
+        SMS_STATE['last_error'] = f"HTTP {status}"
     except Exception as ex:
         SMS_STATE['last_error'] = f"{type(ex).__name__}: {ex}"
     print("[SMS ERROR]", SMS_STATE['last_error'])
     return False, SMS_STATE['last_error']
 
 
-def send_sms(number, text):
-    """Send in the background so the page does not wait. Returns False only when SMS is not set up."""
+def send_sms(number, text, quiet=False):
+    """Send in the background. Returns True when the message was handed to the SMS service."""
     if not number:
         return False
     if not sms_ready():
-        send_sms_now(number, text)           # prints the message (and reset code) in the terminal
+        if not quiet:
+            send_sms_now(number, text)       # prints the message in the terminal
         return False
     threading.Thread(target=send_sms_now, args=(number, text), daemon=True).start()
     return True
 
 
-# ========== FORGOT PASSWORD (6-digit code sent to the contact number) ==========
-RESET_CODES = {}                       # email -> dict(h=hash, exp=timestamp, tries=int, sent=timestamp)
-CODE_TTL, CODE_TRIES, CODE_COOLDOWN = 600, 5, 60     # valid 10 min, 5 attempts, 60 s between texts
+def send_email_now(to, subject, body):
+    """Send one e-mail through SMTP right now. Returns (ok, error_message)."""
+    try:
+        msg = EmailMessage()
+        msg['Subject'] = subject
+        msg['From'] = f"{MAIL_FROM_NAME} <{SMTP_USER}>"
+        msg['To'] = to
+        msg['Date'] = formatdate(localtime=True)
+        msg['Message-ID'] = make_msgid()
+        msg.set_content(body)
+        ctx = ssl.create_default_context()
+        if SMTP_PORT == 465:
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=20) as s:
+                s.login(SMTP_USER, SMTP_PASSWORD)
+                s.send_message(msg)
+        else:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as s:
+                s.starttls(context=ctx)
+                s.login(SMTP_USER, SMTP_PASSWORD)
+                s.send_message(msg)
+        MAIL_STATE.update(last_ok=now_s(), last_error='')
+        print(f"[MAIL] sent to {to}")
+        return True, ''
+    except Exception as ex:
+        MAIL_STATE['last_error'] = f"{type(ex).__name__}: {ex}"
+        print("[MAIL ERROR]", MAIL_STATE['last_error'])
+        return False, MAIL_STATE['last_error']
+
+
+def send_email(to, subject, body):
+    """Send in the background. Returns False when e-mail is not set up."""
+    if not (to and email_ready()):
+        return False
+    threading.Thread(target=send_email_now, args=(to, subject, body), daemon=True).start()
+    return True
+
+
+# ========== FORGOT PASSWORD (6-digit code by text message and/or e-mail) ==========
+RESET_CODES = {}        # email -> dict(h=hash, exp=timestamp, tries=int, sent=timestamp, via=[masked targets])
+CODE_TTL, CODE_TRIES, CODE_COOLDOWN = 600, 5, 60     # valid 10 min, 5 attempts, 60 s between codes
 
 
 def _code_hash(email, code):
@@ -811,13 +946,22 @@ def _code_hash(email, code):
 
 
 def send_reset_code(e):
-    """Create a new 6-digit code (only its hash is kept) and text it to the student's contact number."""
+    """Create a new 6-digit code (only its hash is kept) and send it. Returns the list of masked targets used."""
     code = f"{secrets.randbelow(10 ** 6):06d}"
     now = time.time()
-    RESET_CODES[e] = dict(h=_code_hash(e, code), exp=now + CODE_TTL, tries=0, sent=now)
     number = norm_phone(approved_users[e].get('contact'))
-    return send_sms(number, f"SLSU JGE Registrar: your password reset code is {code}. It works for 10 minutes. "
-                            f"Do not share it with anyone.")
+    via = []
+    if send_sms(number, f"SLSU JGE Registrar: your password reset code is {code}. It works for 10 minutes. "
+                        f"Do not share it with anyone.", quiet=True):
+        via.append(mask_phone(number))
+    if send_email(e, "Your SLSU JGE Registrar password reset code",
+                  f"Your password reset code is {code}.\n\nIt works for 10 minutes. "
+                  f"Do not share it with anyone. If you did not ask for it, ignore this message."):
+        via.append(mask_email(e))
+    if not via:                                  # development fallback: show the code in the terminal
+        print(f"\n[RESET CODE - no SMS or e-mail service is set up]\nAccount: {e}\nCode: {code}\n")
+    RESET_CODES[e] = dict(h=_code_hash(e, code), exp=now + CODE_TTL, tries=0, sent=now, via=via)
+    return via
 
 
 # ========== NOTIFICATIONS, MENU, SURVEY ==========
@@ -847,6 +991,17 @@ CSM_SQD = ["I am satisfied with the service that I availed.",
            "I got what I needed from the government office, or (if denied) denial of request was sufficiently explained to me."]
 
 
+def now_s():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _when(ts):
+    try:
+        return datetime.strptime(ts, '%Y-%m-%d %H:%M:%S').strftime('%b %d, %I:%M %p')
+    except ValueError:
+        return ''
+
+
 def drawer_sub(u):
     """Line under the name in the mobile menu, e.g. 'BSIT-CPT - 3'."""
     if u.get('level') == 'lhs':
@@ -857,20 +1012,21 @@ def drawer_sub(u):
 
 
 def build_notifs(email, me):
-    """Updates about the student's account and documents. Opening the bell clears them (notif_cleared)."""
+    """All updates about the student's account and documents (newest first, max 50).
+    An item is 'unread' until the student opens the Notifications page (notif_cleared timestamp)."""
     cleared = me.get('notif_cleared', '')
     today = date.today()
     tomorrow = (today + timedelta(days=1)).isoformat()
     ev = []
 
     def add(ts, icon, cls, title, sub, go='my-appointments'):
-        if ts and ts > cleared:
+        if ts:
             ev.append((ts, icon, cls, title, sub, go))
 
     add(me.get('approved_at'), 'fa-circle-check', 'c3', 'Account activated',
         'Your account was approved by the Registrar. You can now request your documents.', 'book')
     for a in appointments_db.get(email, []):
-        d = a['document']
+        d = a['document'] + (f" ({a['spec_label']})" if a.get('spec_label') else '')
         add(a.get('submitted_at'), 'fa-file-circle-plus', 'c1', 'Request submitted',
             f"{d} · the Order of Payment is being prepared.")
         add(a.get('order_at'), 'fa-receipt', 'c2', 'Order of Payment is ready',
@@ -893,7 +1049,8 @@ def build_notifs(email, me):
             add(a.get('missed_at'), 'fa-calendar-xmark', 'c2', 'Request not completed', d)
     ev.sort(key=lambda x: x[0], reverse=True)
     return [dict(id=hashlib.md5((ts + t + s_).encode()).hexdigest()[:10], icon=i, cls=c, title=t, sub=s_, go=g,
-                 when=_when(ts)) for ts, i, c, t, s_, g in ev[:50]]
+                 when=_when(ts), unread=ts > cleared) for ts, i, c, t, s_, g in ev[:50]]
+
 # ========== SHARED CSS (deep green theme, light + dark) ==========
 CSS = """
 *{margin:0;padding:0;box-sizing:border-box}
@@ -932,7 +1089,6 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--pri);box
 [data-theme=dark] .msg.error{background:#3a1717;color:#ffb4b4}
 [data-theme=dark] .msg.ok{background:#14301f;color:#9be3b6}
 .hint{font-size:.8rem;color:var(--mut);margin-top:.3rem;line-height:1.5}
-.top-bar{background:var(--dark);color:#d6e6dc;padding:.45rem 2rem;font-size:.78rem;letter-spacing:.3px}
 .header-main{padding:.8rem 2rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;
  justify-content:space-between;flex-wrap:wrap;gap:.8rem 1.5rem;background:var(--card);position:sticky;top:0;z-index:100;
  box-shadow:0 1px 0 var(--bd),0 4px 14px rgba(0,36,15,.05)}
@@ -1052,7 +1208,6 @@ details.cg>summary::-webkit-details-marker{display:none}
 @media(max-width:700px){.g2,.g3{grid-template-columns:1fr}.pm-grid{grid-template-columns:1fr}.pm-grid dd{margin-bottom:.4rem}}
 @media(min-width:900px){.dlist{columns:2;column-gap:2.5rem}}
 @media(max-width:768px){
- .top-bar{padding:.5rem 1rem;font-size:.8rem}
  .header-main{padding:.8rem 1rem}
  .header-main nav{order:3;width:100%}
  .nav-menu{justify-content:center;gap:.2rem}.nav-menu a,.mb{padding:.5rem .7rem;font-size:.9rem}
@@ -1076,35 +1231,23 @@ img,svg,canvas,video{max-width:100%}
 @media only screen and (max-width:768px){
   html,body{overflow-x:hidden}
   body{padding:0}
-
-  /* Header - stack items vertically */
   .header-main{flex-direction:column;align-items:center;text-align:center;padding:12px;gap:10px;position:static}
   .logo-group{justify-content:center}
   .header-main nav{width:100%;margin-top:4px}
   .user-area{justify-content:center;flex-wrap:wrap}
   .user-badge{max-width:100%}
-
-  /* Navigation - make links wrap nicely, easy to tap */
   .nav-menu{flex-wrap:wrap;justify-content:center;gap:6px}
   .nav-menu a,.mb{font-size:15px;padding:8px 12px;min-height:40px;display:flex;align-items:center;justify-content:center}
   .dd{position:fixed;left:12px;right:12px;min-width:0;margin-top:6px;max-height:60vh;overflow:auto}
-
-  /* Main content - better spacing on small screens */
   .page-container{padding:15px;max-width:100%}
   .content{padding:12px}
-
-  /* Headings - normal size, just more breathing room (text is NOT shrunk) */
   .lh h1{font-size:1.3rem}
   h2.t{font-size:1.4rem;margin-bottom:1.1rem;line-height:1.3}
   .ct,h3.sub,.pn>h3{font-size:1.1rem;line-height:1.35}
-
-  /* Cards - full width on mobile */
   .card,.pn{width:100%;margin:12px 0;padding:16px}
   .grid{grid-template-columns:1fr}
   .banner{aspect-ratio:auto}
   .banner img{height:auto;object-fit:contain}
-
-  /* Readable text, with space between lines and blocks so nothing feels crowded */
   body{font-size:16px;line-height:1.6}
   .hint{font-size:.88rem;line-height:1.55}
   th,td{font-size:.95rem}
@@ -1118,26 +1261,18 @@ img,svg,canvas,video{max-width:100%}
   .stat p{font-size:.92rem}
   .alert{font-size:.95rem}
   table.rt td{padding:.6rem 0;line-height:1.5}
-
-  /* Forms - 16px stops iPhone from zooming in, bigger tap targets */
   input,select,textarea{font-size:16px;padding:.8rem .9rem}
   input[type=checkbox],input[type=radio]{width:auto;min-height:0}
-
-  /* Buttons - easier to tap (small table/icon buttons keep their size) */
   form .btn:not(.btn-sm),.btn-full,.btn-danger.btn-full{width:100%;padding:12px;font-size:16px}
   .btn-sm{min-height:38px;padding:.5rem .9rem}
   table.rt td[data-label="Action"]{flex-wrap:wrap;justify-content:flex-end;gap:.5rem}
   table.rt td .nm{justify-content:flex-end}
-
-  /* Grouped lists, dialogs, footer */
   details.cg>summary{padding:.8rem;font-size:1rem}
   .yg{padding:.2rem .8rem 1rem}
   .modal{padding:.5rem}
   .mbox,.mbox.wide{max-width:100%;padding:1.1rem}
   .mbox.wide{max-height:92vh}
   .footer{padding:1.2rem 1rem calc(1.2rem + env(safe-area-inset-bottom));font-size:.85rem}
-
-  /* Admin dashboard */
   .tb{gap:.6rem}
   .gs{max-width:none;min-width:0}
   .tiles{gap:.7rem}.tile b{font-size:1.35rem}
@@ -1157,18 +1292,14 @@ img,svg,canvas,video{max-width:100%}
 /* ========== TOUCH: every button responds like the "More" menu (phones & tablets) ========== */
 a,button,summary,label,select,input[type=checkbox],input[type=radio],
 .btn,.si,.mb,.theme-btn,.pen,.tpw,.lkb,.plink,.hamb,.stat,.x,.pop button,.nav-menu a,.dd a,.gres a{
-  touch-action:manipulation;                      /* no double-tap-zoom delay: the tap fires instantly */
+  touch-action:manipulation;
   -webkit-tap-highlight-color:rgba(0,61,31,.18);
   cursor:pointer;
 }
 button,.btn,.si,.mb,.theme-btn,.pen,summary{-webkit-user-select:none;user-select:none}
 input[readonly]{cursor:not-allowed}
-
-/* Press feedback (works on touch, unlike :hover) */
 .btn:active,.mb:active,.theme-btn:active,.pen:active,.si:active,.nav-menu a:active,
 .pop button:active,.dd a:active,.stat:active,.hamb:active,.tap{transform:scale(.97);filter:brightness(.92)}
-
-/* Touch screens have no real hover: stop buttons staying "stuck" in hover style after a tap */
 @media (hover:none){
   .btn:hover{transform:none;box-shadow:none;background:var(--pri)}
   .btn-danger:hover{background:#c62828;box-shadow:none}
@@ -1184,8 +1315,6 @@ input[readonly]{cursor:not-allowed}
   .nav-menu a:not(.active):hover,.mb:not(.active):hover{background:var(--soft);color:var(--acc)}
   .nav-menu a.active:hover,.mb.active:hover{background:var(--pri);color:#fff}
 }
-
-/* Big enough tap targets on phones and tablets (the small profile pen keeps its small size) */
 @media (max-width:1024px){
   .btn,.btn-sm,.mb,.theme-btn,.tpw,.hamb,.si,.nav-menu a,.dd a,.pop button{min-height:44px}
   .theme-btn,.hamb{min-width:44px}
@@ -1201,8 +1330,6 @@ body.sticky,.adm{min-height:100vh;min-height:100dvh}
 iframe{max-width:100%}
 p,li,dd,.msg,.alert{overflow-wrap:anywhere}
 .g2,.g3{align-items:start}
-
-/* Date fields (Birthday, Preferred Date): same height, left-aligned text and look on every browser */
 input[type=date]{-webkit-appearance:none;appearance:none;display:block;width:100%;line-height:1.3;text-align:left;
   font-family:inherit;color:var(--tx);background-color:var(--inp);min-width:0}
 input[type=date]::-webkit-date-and-time-value{text-align:left;min-height:1.3em;margin:0}
@@ -1211,7 +1338,6 @@ input[type=date]::-webkit-calendar-picker-indicator{cursor:pointer;opacity:.7}
 [data-theme=dark] input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1)}
 input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=hidden]),select{min-height:2.95rem}
 .pf .form-group{min-width:0}
-
 @media (min-width:769px) and (max-width:1024px){
   .header-main{padding:.8rem 1.25rem}
   .header-main nav{order:3;width:100%}
@@ -1220,14 +1346,12 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
   .banner{aspect-ratio:2.4/1}
   .grid{grid-template-columns:repeat(3,1fr)}
   .card{padding:1.3rem}
-  .top-bar{padding:.45rem 1.25rem}
 }
 @media (max-width:768px){
   .header-main{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
   .page-container{padding-left:max(15px,env(safe-area-inset-left));padding-right:max(15px,env(safe-area-inset-right))}
 }
 @media (max-width:480px){
-  .top-bar{font-size:.8rem;line-height:1.45}
   .logo-text h1{font-size:.95rem}
   h2.t{font-size:1.35rem}
   .stp{gap:.8rem}.stp .n{width:34px;height:34px}
@@ -1246,7 +1370,8 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 }
 @media (min-width:1600px){.page-container{max-width:1480px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
-/* ========== MOBILE DRAWER MENU (white, opens from the right, burger beside the profile) ========== */
+
+/* ========== MOBILE DRAWER MENU (opens from the right, burger beside the profile) ========== */
 .dmb{display:none;width:44px;height:44px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--acc);font-size:1.1rem;cursor:pointer;flex:none;align-items:center;justify-content:center}
 .dov,.drawer{display:none}
 .dmh{display:flex;justify-content:space-between;align-items:center;font-size:.92rem;font-weight:700;color:var(--acc);margin:.2rem .4rem .8rem}
@@ -1280,49 +1405,37 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
  .npanel{position:fixed;left:8px;right:8px;top:62px;width:auto}
  .so-desk{display:none!important}
 }
-
-/* ========== SIGN OUT BUTTON (laptop / desktop, under the profile information) ========== */
 .so-desk{margin:0 0 1.4rem}
 .so-desk .btn{display:inline-flex;align-items:center;gap:.5rem}
 
-/* ========== NOTIFICATIONS (list items) ========== */
+/* ========== NOTIFICATION ICONS + CASHIER BELL PANEL ========== */
 .nic{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex:none}
 .nic.c1{background:#d9eefb;color:#2f8fd1}.nic.c2{background:#fde7de;color:#e7824f}.nic.c3{background:#dcf5e3;color:#25a35a}
 .nempty{padding:2rem 1rem;text-align:center;color:var(--mut);font-size:.88rem;line-height:2}
 .nempty i{font-size:1.6rem}
+.bellw{position:relative}
+.bell{width:40px;height:40px;border-radius:50%;border:1px solid var(--bd);background:var(--card);color:var(--acc);cursor:pointer;position:relative;font-size:1rem;flex:none}
+.bell:hover{background:var(--soft)}
+.bell .cnt{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:9px;background:#d93025;color:#fff;font-size:.68rem;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px}
+.npanel{display:none;position:absolute;right:0;top:48px;width:min(92vw,410px);background:var(--card);border:1px solid var(--bd);border-radius:14px;box-shadow:var(--sh);z-index:400;overflow:hidden}
+.npanel.open{display:block}
+.nph{display:flex;justify-content:space-between;align-items:center;gap:.6rem;padding:.8rem 1rem;border-bottom:1px solid var(--bd);font-weight:700;color:var(--acc)}
+.nph button{background:var(--soft);border:0;color:var(--acc);font-weight:600;font-size:.78rem;cursor:pointer;border-radius:2rem;padding:.35rem .7rem}
+.nlist{max-height:min(60vh,440px);overflow-y:auto;overflow-x:hidden}
+.ni{display:flex;gap:.7rem;padding:.85rem 1rem;border-bottom:1px solid var(--bd);align-items:flex-start;cursor:pointer}
+.ni:hover{background:var(--row)}
+.ni b{display:block;font-size:.9rem;white-space:normal;overflow-wrap:anywhere;color:var(--tx)}
+.ni small{display:block;color:var(--mut);font-size:.8rem;line-height:1.45;white-space:normal;overflow-wrap:anywhere}
+.ni>div{flex:1;min-width:0}.ni .nw{font-size:.7rem;color:var(--mut);text-align:right;max-width:72px;line-height:1.3;flex:none}
 
-/* ========== CLIENT SATISFACTION MEASUREMENT (survey on the login page) ========== */
-.csm-top{text-align:center;margin-bottom:1rem}
-.csm-top strong{color:var(--acc);font-size:1.1rem;display:block}
-.csm-top span{display:block;font-weight:700;letter-spacing:.8px;color:var(--mut);font-size:.8rem;margin-top:.2rem}
-.csm h3.ct{margin-top:1.5rem;padding-top:1.1rem;border-top:1px solid var(--bd)}
-.csm .rq{margin:.4rem 0}
-.csm .rq input{width:auto;min-height:0;padding:0}
-.sqd{padding:1rem 0;border-bottom:1px solid var(--bd)}.sqd p{margin-bottom:.7rem;line-height:1.5}
-.opts{display:grid;grid-template-columns:repeat(6,1fr);gap:.5rem}
-.op{position:relative;margin:0;cursor:pointer;display:block}
-.op input{position:absolute;opacity:0;width:1px;height:1px;padding:0;min-height:0;pointer-events:none}
-.op span{display:flex;flex-direction:column;align-items:center;gap:.3rem;text-align:center;padding:.65rem .3rem;border:1px solid var(--bd);border-radius:10px;background:var(--inp);height:100%;transition:.15s}
-.op span i{font-size:1.55rem;color:var(--mut)}
-.op span small{font-size:.76rem;line-height:1.2;color:var(--mut);font-weight:600}
-.op input:checked+span{background:var(--soft);border-color:var(--acc)}
-.op input:checked+span i,.op input:checked+span small{color:var(--acc)}
-.op input:focus-visible+span{box-shadow:0 0 0 3px rgba(31,122,71,.35)}
-.fcode{text-align:center;color:var(--mut);font-size:.76rem;margin-top:1.2rem}
-@media(max-width:600px){.opts{grid-template-columns:repeat(3,1fr)}}
-
-/* ========== MAP ========== */
-.mapbox iframe{width:100%;height:380px;border:0;border-radius:12px;display:block}
-.mapbtn{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.9rem}
-@media(max-width:600px){.mapbox iframe{height:300px}}
-
-/* ========== NOTIFICATIONS PAGE ========== */
+/* ========== NOTIFICATIONS PAGE (student) ========== */
 .nbar{display:flex;justify-content:space-between;align-items:center;gap:.8rem;flex-wrap:wrap;margin-bottom:1rem}
-.nftabs{display:flex;gap:.5rem}
+.nftabs{display:flex;gap:.5rem;flex-wrap:wrap}
+.nacts{display:flex;gap:.5rem;flex-wrap:wrap}
 .nft{border:1px solid var(--bd);background:var(--card);color:var(--mut);padding:.55rem 1rem;border-radius:2rem;font-weight:600;font-size:.88rem;cursor:pointer}
 .nft.active{background:var(--pri);border-color:var(--pri);color:#fff}
 .nft.active .pill{background:#fff;color:var(--pri)}
-.nrow{display:flex;gap:1rem;align-items:flex-start;padding:1.1rem 1.2rem;margin-bottom:.8rem;background:var(--card);border:1px solid var(--bd);border-radius:14px;box-shadow:var(--sh);text-decoration:none;color:var(--tx);transition:.15s}
+.nrow{display:flex;gap:1rem;align-items:flex-start;padding:1.1rem 1.2rem;margin-bottom:.8rem;background:var(--card);border:1px solid var(--bd);border-radius:14px;box-shadow:var(--sh);color:var(--tx);transition:.15s;cursor:pointer}
 .nrow:hover{border-color:var(--acc)}
 .nrow.unread{border-left:5px solid var(--gold);background:var(--soft)}
 .nrow .nic{width:46px;height:46px;font-size:1.2rem;border-radius:12px}
@@ -1332,7 +1445,12 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 .nbody small{display:block;margin-top:.35rem;color:var(--mut);font-size:.78rem}
 .nnew{background:#d93025;color:#fff;font-size:.66rem;font-weight:700;padding:.15rem .55rem;border-radius:2rem;flex:none}
 
-/* ========== VISION / MISSION / CORE VALUES (About Us) ========== */
+/* ========== CLIENT SATISFACTION: leftovers, MAP ========== */
+.mapbox iframe{width:100%;height:380px;border:0;border-radius:12px;display:block}
+.mapbtn{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.9rem}
+@media(max-width:600px){.mapbox iframe{height:300px}}
+
+/* ========== ABOUT US: VISION / MISSION / CORE VALUES ========== */
 .vmg{text-align:center}
 .vmg-h{background:var(--pri);color:#fff;text-align:center;font-weight:500;font-size:1.55rem;line-height:1.3;padding:.15rem .6rem;margin:0 0 1.3rem;letter-spacing:.3px}
 .vmg p{color:var(--tx);line-height:1.85;font-size:.96rem}
@@ -1352,31 +1470,13 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 .qp-row{display:grid;grid-template-columns:1fr 1fr;gap:1.6rem;padding:1rem 0;border-top:2px dotted var(--bd)}
 .qp-row.first{border-top:0;padding-top:0}
 .qp-row p{margin:0;color:var(--tx);text-align:justify;line-height:1.7}
-.qp-row p.tl{color:var(--tx)}
 .qp-sign{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap;margin-top:1.4rem;padding-top:1.2rem;border-top:3px solid var(--acc)}
 .qp-sign b{display:block;color:var(--tx);font-size:1rem}
 .qp-sign span{color:var(--mut);font-size:.9rem}
 .qp-rev{font-size:.82rem;color:var(--mut);text-align:right;line-height:1.5}
 @media(max-width:700px){.qp-row{gap:.8rem}.qp-row p{text-align:left;font-size:.88rem;line-height:1.55}.qp-head h3{font-size:1.2rem}}
 
-/* ========== NOTIFICATION BELL (beside the profile) ========== */
-.bellw{position:relative}
-.bell{width:40px;height:40px;border-radius:50%;border:1px solid var(--bd);background:var(--card);color:var(--acc);cursor:pointer;position:relative;font-size:1rem;flex:none}
-.bell:hover{background:var(--soft)}
-.bell .cnt{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:9px;background:#d93025;color:#fff;font-size:.68rem;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px}
-.npanel{display:none;position:absolute;right:0;top:48px;width:min(92vw,410px);background:var(--card);border:1px solid var(--bd);border-radius:14px;box-shadow:var(--sh);z-index:400;overflow:hidden}
-.npanel.open{display:block}
-.nph{display:flex;justify-content:space-between;align-items:center;gap:.6rem;padding:.8rem 1rem;border-bottom:1px solid var(--bd);font-weight:700;color:var(--acc)}
-.nph button{background:var(--soft);border:0;color:var(--acc);font-weight:600;font-size:.78rem;cursor:pointer;border-radius:2rem;padding:.35rem .7rem}
-.nlist{max-height:min(60vh,440px);overflow-y:auto;overflow-x:hidden}
-.ni{display:flex;gap:.7rem;padding:.85rem 1rem;border-bottom:1px solid var(--bd);align-items:flex-start;cursor:pointer}
-.ni:hover{background:var(--row)}
-.ni b{display:block;font-size:.9rem;white-space:normal;overflow-wrap:anywhere;color:var(--tx)}
-.ni small{display:block;color:var(--mut);font-size:.8rem;line-height:1.45;white-space:normal;overflow-wrap:anywhere}
-.ni>div{flex:1;min-width:0}.ni .nw{font-size:.7rem;color:var(--mut);text-align:right;max-width:72px;line-height:1.3;flex:none}
-.nfoot{padding:.7rem 1rem;font-size:.76rem;color:var(--mut);line-height:1.5;background:var(--row)}
-
-/* ========== STAGES, PAYMENT REMINDER, SERVICES PICTURE, SCANNER ========== */
+/* ========== STAGES, PAYMENT FLOW, SCANNER, SPECIFICATION BOX ========== */
 .stg{display:inline-block;padding:.25rem .7rem;border-radius:2rem;font-size:.76rem;font-weight:700;background:var(--warn);color:var(--warnt);line-height:1.3}
 .stg.ok{background:#dcf5e3;color:#14532d}[data-theme=dark] .stg.ok{background:#163324;color:#9be3b6}
 .stg.blue{background:#d9eefb;color:#16587f}[data-theme=dark] .stg.blue{background:#17303f;color:#9fd3f3}
@@ -1385,10 +1485,8 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 .payflow ol{padding-left:1.3rem}.payflow li{padding:.25rem 0;line-height:1.6;color:var(--tx)}
 .payflow .qrbox{margin-top:.8rem;text-align:center}
 .payflow .qrbox img{width:200px;max-width:70%;border-radius:12px;border:1px solid var(--bd);background:#fff;padding:6px}
-.payflow .hint{color:var(--mut)}
-.svcimg{text-align:center}
-.svcimg img{width:100%;height:auto;border-radius:12px;display:block;border:1px solid var(--bd)}
 .scanbox{background:var(--soft);border:1px dashed var(--acc);border-radius:12px;padding:1rem 1.2rem;margin:0 0 1.2rem}
+.specbox{background:var(--soft);border:1px solid var(--bd);border-left:4px solid var(--acc);border-radius:12px;padding:1rem 1.2rem 0;margin:0 0 1.2rem}
 .scanbtn{display:flex;gap:.6rem;flex-wrap:wrap;margin:.7rem 0}
 .scanbtn .btn{display:inline-flex;align-items:center;gap:.5rem}
 .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:.7rem;margin-top:.7rem}
@@ -1397,54 +1495,84 @@ input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):
 .thumbs .th b{position:absolute;left:6px;top:6px;background:var(--pri);color:#fff;border-radius:2rem;font-size:.7rem;padding:.1rem .5rem}
 .thumbs .th button{position:absolute;right:4px;top:4px;width:26px;height:26px;border-radius:50%;border:0;background:#c62828;color:#fff;cursor:pointer;font-size:.8rem}
 
-/* ========== CLIENT SATISFACTION SURVEY (same layout as the paper form) ========== */
-.paper-csm{font-family:'Times New Roman',Times,serif;color:#111}
-.csm-head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-bottom:.6rem}
-.csm-brand{display:flex;align-items:center;gap:.8rem}
-.csm-brand .logo-circle{width:58px;height:58px}
-.csm-brand strong{display:block;font-size:1rem;letter-spacing:.3px}
-.csm-brand span{display:block;font-weight:700;font-size:.82rem;letter-spacing:.6px;margin-top:.1rem}
-.arta{border:2px solid #111;padding:.45rem .8rem;text-align:center;font-size:.76rem;line-height:1.35;max-width:270px}
-.arta b{display:block;letter-spacing:.4px;font-size:.84rem}
-.arta span{display:block}
-.ctl{margin:.4rem 0;font-weight:700}
-.ctl u{font-weight:400;color:#555}
-.csm-intro{font-size:.93rem;line-height:1.55;margin:.3rem 0 .8rem;text-align:justify}
-.csm-row{display:flex;gap:.4rem 1.3rem;flex-wrap:wrap;align-items:center;margin:.55rem 0}
-.csm-row>b{font-weight:700}
-.csm-row label{display:inline-flex;align-items:center;gap:.4rem;margin:0;font-weight:400;font-size:.95rem;color:#111}
-.csm-row input[type=text],.csm-row input[type=number],.csm-row input[type=date]{width:auto;min-width:0;flex:1 1 160px;border:0;border-bottom:1px solid #111;border-radius:0;background:transparent;padding:.2rem .3rem;min-height:0;color:#111;font-family:inherit}
-.csm-row select{width:auto;flex:1 1 220px;border:0;border-bottom:1px solid #111;border-radius:0;background:transparent;padding:.2rem .3rem;min-height:0;color:#111;font-family:inherit}
-.csm-ins{font-size:.9rem;line-height:1.5;margin:.9rem 0 .4rem;text-align:justify}
-.csm-ins b{letter-spacing:.3px}
-.ccq{margin:.7rem 0}
-.ccq>p{font-weight:700;font-size:.93rem;line-height:1.45;margin-bottom:.2rem}
-.ccq .opt{display:flex;gap:.55rem;align-items:flex-start;margin:.25rem 0 .25rem 1.2rem;font-weight:400;font-size:.92rem;line-height:1.45;color:#111}
-.paper-csm input[type=radio]{-webkit-appearance:none;appearance:none;width:18px;height:18px;min-height:0;padding:0;border:2px solid #111;border-radius:3px;background:#fff;flex:none;margin:.15rem 0 0;position:relative;cursor:pointer}
-.paper-csm input[type=radio]:checked::after{content:"\\2713";position:absolute;left:1px;top:-4px;font-size:16px;font-weight:700;color:#003d1f}
-.sqt{width:100%;border-collapse:collapse;margin:.5rem 0;background:#fff;font-size:.86rem}
-.sqt th,.sqt td{border:1.5px solid #111;padding:.45rem .35rem;text-align:center;white-space:normal;color:#111;background:#fff;position:static}
-.sqt th{font-size:.7rem;text-transform:none;letter-spacing:0;font-weight:700}
-.sqt th i{display:block;font-size:1.7rem;margin-bottom:.2rem}
-.sqt td.q{text-align:left;font-size:.88rem;line-height:1.4;min-width:200px}
-.sqt td.ck{width:11%}
-.sqt td.ck label{display:flex;justify-content:center;margin:0;cursor:pointer}
-.sqt tr:hover td{background:#fff}
-.csm-line{display:block;width:100%;border:0;border-bottom:1px solid #111;border-radius:0;background:transparent;padding:.3rem 0;min-height:0;color:#111;font-family:inherit;font-size:1rem}
-.csm-ty{text-align:center;font-weight:700;margin:1rem 0 .2rem;letter-spacing:.5px}
-.csm-code{text-align:right;font-weight:700;font-size:.8rem;line-height:1.3;margin-top:.3rem}
+/* ========== SERVICES PAGE: copy of the registrar's processing-time poster ========== */
+.gl-t{text-align:center;font-size:1.55rem;font-weight:800;letter-spacing:.3px;color:var(--tx);margin-bottom:.9rem}
+.gl-h{background:#dfe64f;border:3px solid #6b7a12;color:#1b2a05;text-align:center;font-weight:800;padding:.7rem 1rem;margin-bottom:1.1rem;font-size:.95rem;line-height:1.35}
+.gtb{width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:1rem;background:var(--card);border:2px solid #222}
+.gtb th,.gtb td{border:1.5px solid #222;white-space:normal;vertical-align:top;font-size:.86rem;padding:.55rem .7rem;line-height:1.45;color:var(--tx);text-transform:none;letter-spacing:0;position:static}
+.gtb th{text-align:center;font-weight:700}
+.gtb th.gbar{background:#222;color:#fff;font-size:1.05rem;text-transform:uppercase;letter-spacing:.5px}
+.gtb tr.gsub th{background:var(--soft);color:var(--tx);font-size:.76rem;letter-spacing:.5px;text-transform:uppercase}
+.gtb td.gd{text-align:center;font-weight:700;font-size:.92rem;width:18%}
+.gtb ol{list-style:lower-alpha;padding-left:1.35rem}.gtb ul{padding-left:1.1rem}
+.gtb li{padding:.1rem 0;color:var(--tx)}
+.gtb p{margin:0 0 .4rem;color:var(--tx)}
+.gtb .eg{font-size:.82rem;color:var(--mut)}
+.gtb .fn{font-size:.8rem;font-style:italic}
+.gtb td.gc{width:44%}
+.gnote{border-bottom:2px solid #222;padding:.2rem 0 .8rem;margin:-.2rem 0 1.4rem;font-size:.85rem}
+.gnote b{display:block;margin-bottom:.2rem}.gnote ol{list-style:lower-alpha;padding-left:1.5rem}.gnote li{padding:.1rem 0;color:var(--tx)}
+[data-theme=dark] .gtb,[data-theme=dark] .gtb th,[data-theme=dark] .gtb td{border-color:#8da296}
+[data-theme=dark] .gnote{border-color:#8da296}
 @media(max-width:700px){
- .sqt thead{display:none}
- .sqt,.sqt tbody,.sqt tr,.sqt td{display:block;width:100%}
- .sqt tr{border:1.5px solid #111;margin-bottom:.8rem}
- .sqt td{border:0;border-bottom:1px solid #ccc}
- .sqt td.q{min-width:0}
- .sqt td.ck{width:100%}
- .sqt td.ck label{justify-content:space-between;align-items:center;padding:.15rem .3rem}
- .sqt td.ck::before{content:none}
- .sqt td.ck label::before{content:attr(data-label);font-size:.92rem;font-weight:700;text-align:left}
+ .gl-t{font-size:1.2rem}.gl-h{font-size:.82rem}
+ .gtb,.gtb thead,.gtb tbody,.gtb tr,.gtb td,.gtb th{display:block;width:100%}
+ .gtb tr.gsub{display:none}
+ .gtb td.gd,.gtb td.gc{width:100%}
+ .gtb td{border-width:0 0 1px;padding:.6rem .8rem}
+ .gtb td.gd{background:var(--soft);font-size:1rem;text-align:left}
+ .gtb td::before{content:attr(data-label);display:block;font-weight:700;font-size:.68rem;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.15rem}
+ .gtb tr{border-bottom:2px solid #222}
 }
 
+/* ========== CLIENT SATISFACTION SURVEY (same layout as the paper form, compact) ========== */
+.paper-csm{font-family:'Times New Roman',Times,serif;color:#111;font-size:.9rem}
+.csm-head{display:flex;justify-content:space-between;align-items:flex-start;gap:.8rem;flex-wrap:wrap;margin-bottom:.5rem}
+.csm-brand{display:flex;align-items:center;gap:.7rem}
+.csm-brand .logo-circle{width:52px;height:52px}
+.csm-brand strong{display:block;font-size:.95rem;letter-spacing:.3px}
+.csm-brand span{display:block;font-weight:700;font-size:.78rem;letter-spacing:.6px;margin-top:.1rem}
+.arta{border:2px solid #111;padding:.35rem .7rem;text-align:center;font-size:.72rem;line-height:1.3;max-width:260px}
+.arta b{display:block;letter-spacing:.4px;font-size:.8rem}
+.arta span{display:block}
+.ctl{margin:.3rem 0;font-weight:700;font-size:.88rem}
+.ctl u{font-weight:400;color:#555}
+.csm-intro{font-size:.86rem;line-height:1.5;margin:.3rem 0 .6rem;text-align:justify}
+.csm-row{display:flex;gap:.3rem 1.1rem;flex-wrap:wrap;align-items:center;margin:.45rem 0}
+.csm-row>b{font-weight:700;font-size:.88rem}
+.csm-row label{display:inline-flex;align-items:center;gap:.35rem;margin:0;font-weight:400;font-size:.88rem;color:#111}
+.csm-row input[type=text],.csm-row input[type=number],.csm-row input[type=date]{width:auto;min-width:0;flex:1 1 150px;border:0;border-bottom:1px solid #111;border-radius:0;background:transparent;padding:.15rem .3rem;min-height:0;color:#111;font-family:inherit;font-size:.9rem}
+.csm-row select{width:auto;flex:1 1 200px;border:0;border-bottom:1px solid #111;border-radius:0;background:transparent;padding:.15rem .3rem;min-height:0;color:#111;font-family:inherit;font-size:.9rem}
+.csm-ins{font-size:.84rem;line-height:1.45;margin:.7rem 0 .3rem;text-align:justify}
+.ccq{margin:.55rem 0}
+.ccq>p{font-weight:700;font-size:.86rem;line-height:1.4;margin-bottom:.15rem}
+.ccq .opt{display:flex;gap:.5rem;align-items:flex-start;margin:.2rem 0 .2rem 1rem;font-weight:400;font-size:.85rem;line-height:1.4;color:#111}
+.paper-csm input[type=radio]{-webkit-appearance:none;appearance:none;width:16px;height:16px;min-height:0;padding:0;border:2px solid #111;border-radius:3px;background:#fff;flex:none;margin:.1rem 0 0;position:relative;cursor:pointer}
+.paper-csm input[type=radio]:checked::after{content:"\\2713";position:absolute;left:0;top:-4px;font-size:15px;font-weight:700;color:#003d1f}
+.sqt{width:100%;border-collapse:collapse;table-layout:fixed;margin:.4rem 0;background:#fff;font-size:.8rem}
+.sqt th,.sqt td{border:1.5px solid #111;padding:.3rem .2rem;text-align:center;white-space:normal;color:#111;background:#fff;position:static;vertical-align:middle}
+.sqt th{font-size:.62rem;text-transform:none;letter-spacing:0;font-weight:700;line-height:1.15}
+.sqt th i{display:block;font-size:1.25rem;margin-bottom:.15rem}
+.sqt th:first-child{width:36%}
+.sqt td.q{text-align:left;font-size:.78rem;line-height:1.35;padding:.3rem .45rem}
+.sqt td.ck label{display:flex;justify-content:center;margin:0;cursor:pointer}
+.sqt td.ck .mi{display:none}
+.sqt tr:hover td{background:#fff}
+.csm-line{display:block;width:100%;border:0;border-bottom:1px solid #111;border-radius:0;background:transparent;padding:.25rem 0;min-height:0;color:#111;font-family:inherit;font-size:.95rem}
+.csm-ty{text-align:center;font-weight:700;margin:.8rem 0 .2rem;letter-spacing:.5px}
+.csm-code{text-align:right;font-weight:700;font-size:.75rem;line-height:1.3;margin-top:.3rem}
+@media(max-width:700px){
+ .sqt thead{display:none}
+ .sqt,.sqt tbody{display:block;width:100%}
+ .sqt tr{display:grid;grid-template-columns:repeat(6,1fr);border:1.5px solid #111;margin-bottom:.6rem}
+ .sqt td{border:0;border-right:1px solid #ccc;padding:.3rem .1rem;display:block}
+ .sqt td:last-child{border-right:0}
+ .sqt td.q{grid-column:1/-1;border-right:0;border-bottom:1px solid #bbb;padding:.45rem .5rem;font-size:.8rem}
+ .sqt td.ck label{flex-direction:column;align-items:center;justify-content:flex-start;gap:.15rem;padding:0}
+ .sqt td.ck .mi{display:block;font-size:1.15rem;order:1}
+ .sqt td.ck label::before{content:attr(data-label);order:2;font-size:.58rem;line-height:1.1;font-weight:700;text-align:center;min-height:2.3em;display:flex;align-items:center}
+ .sqt td.ck input{order:3}
+}
 """
 
 HEAD_LINKS = ('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">'
@@ -1475,13 +1603,12 @@ TOUCH_JS = ("document.addEventListener('touchstart',e=>{"
             "if(b)b.classList.add('tap')},{passive:true});"
             "['touchend','touchcancel'].forEach(n=>document.addEventListener(n,()=>{"
             "document.querySelectorAll('.tap').forEach(x=>x.classList.remove('tap'))},{passive:true}));")
-
 # Birthday fields cannot be set in the future (uses the device's local date).
 DATE_JS = ("(function(){const d=new Date(),p=n=>String(n).padStart(2,'0'),"
            "t=d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());"
            "document.querySelectorAll('input[name=\"birthday\"]').forEach(i=>{i.max=t})})();")
 
-# ========== LOGIN / REGISTER ==========
+# ========== LOGIN / REGISTER / FORGOT PASSWORD ==========
 # Light frosted card with a gold top edge, over the tinted office photo.
 LOGIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -1493,8 +1620,6 @@ body{background:transparent;min-height:100vh;min-height:100dvh;display:flex;alig
  padding:1.25rem 1rem calc(1.25rem + env(safe-area-inset-bottom))}
 body::before{content:"";position:fixed;inset:0;z-index:-2;background:url('{{ bg }}') center/cover no-repeat}
 body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradient(rgba(0,61,31,.45),rgba(0,36,15,.7))}
-
-/* ---- light frosted card with gold top edge ---- */
 .lcard{position:relative;width:100%;max-width:460px;padding:2rem 2rem 1.4rem;color:#1b2620;border-radius:22px;
  background:rgba(255,255,255,.93);
  -webkit-backdrop-filter:blur(14px) saturate(130%);backdrop-filter:blur(14px) saturate(130%);
@@ -1507,8 +1632,6 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
 .lh h1{font-size:1.3rem;font-weight:700;color:#003d1f;line-height:1.25}
 .lh p{font-size:.88rem;color:#5d6a62;margin-top:.5rem}
 .lform{margin-top:1.6rem}
-
-/* ---- form controls ---- */
 .lcard label{color:#1b2620;font-size:.86rem}
 .lcard input,.lcard select{background:#fff;border:1px solid #dde3df;color:#1b2620;border-radius:12px;
  padding:.85rem 1rem;font-size:16px}
@@ -1520,19 +1643,6 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
 .lcard .hint{color:#5d6a62}
 .lcard .msg{background:#eefaf1;color:#14532d;border-color:#2e9d68}
 .lcard .msg.error{background:#fff2f2;color:#a30000;border-color:#e53935}
-
-/* ---- "Your account has been activated" reminder: stays until the student logs in ---- */
-.actv{display:flex;gap:.8rem;align-items:flex-start;margin-top:1rem;padding:.9rem 1rem;border-radius:12px;
- background:#eefaf1;color:#14532d;border:1px solid #2e9d68;border-left:5px solid #2e9d68;font-size:.9rem;line-height:1.5}
-.actv i{font-size:1.4rem;color:#2e9d68;margin-top:.1rem}
-.actv b{display:block;font-size:.98rem;margin-bottom:.1rem}
-
-/* ---- "Waiting for activation - try again later" reminder ---- */
-.rmd{display:flex;gap:.8rem;align-items:flex-start;margin-top:1rem;padding:.9rem 1rem;border-radius:12px;
- background:#fff7e0;color:#7a5a00;border:1px solid #e3b43a;border-left:5px solid #e0a100;font-size:.9rem;line-height:1.5;text-align:left}
-.rmd i{font-size:1.4rem;color:#e0a100;margin-top:.1rem}
-.rmd b{display:block;font-size:.98rem;margin-bottom:.1rem}
-
 .iw{position:relative}.iw input{padding-right:4.2rem}
 .tpw{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:#5d6a62;cursor:pointer;
  font-size:.84rem;font-weight:500;height:40px;padding:0 .7rem}
@@ -1542,11 +1652,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
 .row label{display:flex;align-items:center;gap:.45rem;margin:0;font-weight:600}.row input{width:auto}
 .lkb,a.lk{color:#003d1f;text-decoration:none;font-size:.88rem;background:none;border:0;cursor:pointer;font-weight:500}
 .lkb:hover,a.lk:hover{text-decoration:underline}
-.agree{display:flex;gap:.6rem;align-items:flex-start;font-weight:400;font-size:.84rem;line-height:1.45;margin:.2rem 0 1.1rem;cursor:pointer}
-.agree input{width:auto;margin-top:.2rem;flex:none}
 .lcard .g3{grid-template-columns:1fr 1fr 1fr;gap:0 .6rem}
-
-/* ---- help section (register page) ---- */
 .hp{margin-top:1.3rem;border:1px solid #dde3df;border-radius:14px;background:#f6faf7;padding:0}
 .hp summary{cursor:pointer;list-style:none;padding:.85rem 1rem;font-weight:600;font-size:.9rem;display:flex;align-items:center;gap:.6rem;color:#003d1f}
 .hp summary::-webkit-details-marker{display:none}
@@ -1558,26 +1664,25 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
  font-weight:700;font-size:.78rem;display:flex;align-items:center;justify-content:center;margin-top:.05rem}
 .hp li b{color:#003d1f}
 .hp .tip{margin:0 1rem 1rem;padding:.65rem .8rem;border-radius:10px;background:#e3f0e8;font-size:.8rem;color:#1b2620}
-
 .center{text-align:center;margin-top:1.2rem;font-size:.9rem;color:#5d6a62}
 .center a{color:#003d1f;text-decoration:none;font-weight:600}.center a:hover{text-decoration:underline}
 .copy{text-align:center;font-size:.76rem;color:#8a948e;margin-top:1.3rem;line-height:1.6}
-.copy .lkb{font-size:.92rem;line-height:1.3;color:#003d1f;font-weight:700;text-decoration:underline;padding:.55rem .4rem;margin-top:.2rem}
-.copy .links{display:grid;grid-template-columns:1fr 1fr;gap:.4rem;align-items:stretch}
-.copy .links i{display:none}
-.mbox.survey{max-width:820px;color:#111;background:#fff}
+/* Terms and Client Satisfaction Survey: same row, equal columns, centered */
+.copy .links{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;align-items:start;justify-items:center;margin-top:.3rem}
+.copy .links .lkb{width:100%;text-align:center;font-size:.9rem;line-height:1.3;color:#003d1f;font-weight:700;
+ text-decoration:underline;padding:.55rem .3rem;margin:0}
+.mbox.survey{max-width:780px;color:#111;background:#fff}
 @media(max-width:480px){
  body{padding:.8rem .7rem calc(.8rem + env(safe-area-inset-bottom));align-items:flex-start}
  .lcard{padding:1.5rem 1.2rem 1.1rem;border-radius:20px;margin:auto 0}
  .lh .logo-circle{width:84px;height:84px}.lh h1{font-size:1.25rem}
  .lcard .g3,.lcard .g2{grid-template-columns:1fr}
+ .copy .links .lkb{font-size:.82rem}
 }
 </style></head><body>
 <div class="lcard">
  <div class="lh">""" + LOGO_HTML + """<h1>SLSU JGE - Office of the Registrar</h1><p>Registrar Appointment System</p></div>
  {% for cat, m in get_flashed_messages(with_categories=true) %}<div class="msg {{ cat }}" style="margin-top:1rem">{{ m }}</div>{% endfor %}
- {% if page == 'login' and activated %}<div class="actv" id="actv"><i class="fas fa-circle-check"></i><div><b>Your account has been activated</b>The Registrar's Office approved your account. You can now log in below.</div></div>{% endif %}
- {% if page == 'login' and waiting %}<div class="rmd" id="rmdw"><i class="fas fa-clock-rotate-left"></i><div><b>Your account is waiting for activation</b>The Registrar's Office has not approved it yet. Please try again later.</div></div>{% endif %}
 
  {% if page == 'login' %}
   <form method="POST" action="/login" class="lform">
@@ -1588,28 +1693,27 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
     <button type="button" class="tpw" onclick="tp('lp',this)" aria-label="Show password">Show</button></div></div>
    <div class="row"><label><input type="checkbox" name="remember"> Remember me</label>
     <a class="lk" href="/forgot">Forgot password?</a></div>
-
    <button class="btn btn-full">Log In</button></form>
   <p class="center">No account yet? <a href="/register">Register here</a></p>
 
  {% elif page == 'forgot' %}
   <div style="text-align:center;margin-top:1.4rem"><i class="fas fa-magnifying-glass" style="font-size:2.4rem;color:#003d1f"></i></div>
-  <h2 style="margin:.8rem 0 .3rem;font-size:1.4rem;color:#003d1f">Find your account</h2>
-  <p class="hint" style="font-size:.9rem">Enter the contact number you used for your account. We will text you a 6-digit code.</p>
+  <h2 style="margin:.8rem 0 .3rem;font-size:1.4rem;color:#003d1f;text-align:center">Find your account</h2>
+  <p class="hint" style="font-size:.9rem;text-align:center">Enter your contact number, Gmail or Student ID. We will send a 6-digit code to your phone and/or Gmail.</p>
   <form method="POST" action="/forgot" class="lform" style="margin-top:1.1rem">
-   <div class="form-group"><label>Contact Number</label><input type="tel" name="contact" required inputmode="tel" autocomplete="tel" placeholder="09XX-XXX-XXXX" pattern="[0-9+\\- ]{11,16}"></div>
+   <div class="form-group"><label>Contact Number, Gmail or Student ID</label><input type="text" name="contact" required autocomplete="username" placeholder="09XX-XXX-XXXX or yourname@gmail.com"></div>
    <button class="btn btn-full">Continue</button></form>
   <p class="center"><a href="/login">← Back to Log In</a></p>
 
  {% elif page == 'verify' %}
-  <div style="text-align:center;margin-top:1.4rem"><i class="fas fa-comment-sms" style="font-size:2.4rem;color:#003d1f"></i>
+  <div style="text-align:center;margin-top:1.4rem"><i class="fas fa-key" style="font-size:2.4rem;color:#003d1f"></i>
    <h2 style="margin:.8rem 0 .4rem;font-size:1.3rem;color:#003d1f">Enter the code</h2>
-   <p class="hint" style="font-size:.9rem">We sent a 6-digit code by text message to <strong>{{ masked }}</strong>. It works for 10 minutes.</p></div>
+   <p class="hint" style="font-size:.9rem">{% if sent_to %}We sent a 6-digit code to <strong>{{ sent_to }}</strong>.{% else %}We sent a 6-digit code to your registered phone or Gmail.{% endif %} It works for 10 minutes.</p></div>
   <form method="POST" action="/forgot/verify" class="lform" style="margin-top:1.1rem">
    <div class="form-group"><input type="text" name="code" required inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" style="text-align:center;font-size:1.6rem;letter-spacing:.5rem;font-weight:700"></div>
    <button class="btn btn-full">Continue</button></form>
   <form method="POST" action="/forgot/resend" style="text-align:center;margin-top:.9rem"><button type="submit" class="lkb">Didn't get a code? Resend code</button></form>
-  <p class="center"><a href="/forgot">← Use a different number</a></p>
+  <p class="center"><a href="/forgot">← Use a different account</a></p>
 
  {% elif page == 'reset' %}
   <div style="text-align:center;margin-top:1.4rem"><i class="fas fa-lock" style="font-size:2.4rem;color:#003d1f"></i>
@@ -1622,6 +1726,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
     <button type="button" class="tpw" onclick="tp('n2',this)" aria-label="Show password">Show</button></div></div>
    <button class="btn btn-full">Reset Password</button></form>
   <p class="center"><a href="/login">← Back to Log In</a></p>
+
  {% elif page == 'register' %}
   <form method="POST" action="/register" class="lform">
    <div class="g3">
@@ -1655,7 +1760,6 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
     <button type="button" class="tpw" onclick="tp('p2',this)" aria-label="Show password">Show</button></div></div>
    <button class="btn btn-full">Submit for Activation</button></form>
   <p class="center">Already have an account? <a href="/login">Log In</a></p>
-
   <details class="hp" open><summary><i class="fas fa-circle-question"></i> Need help? How to register an account</summary>
    <ol>
     <li><span>Fill in the form on this page.</span></li>
@@ -1671,23 +1775,21 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
   <div style="text-align:center;padding:1.4rem 0 .6rem"><i class="fas fa-clock" id="pic" style="font-size:3rem;color:#003d1f"></i>
    <h2 id="ptt" style="margin:1rem 0;font-size:1.25rem;color:#003d1f">Awaiting Activation</h2></div>
   <p id="ptx" style="text-align:center;line-height:1.6;color:#1b2620">Your account has been submitted. Please wait for the administrator to approve it. Keep this page open and we will notify you here as soon as it is approved.</p>
-  <div class="rmd" id="prm"><i class="fas fa-clock-rotate-left"></i><div><b>Reminder</b>Approval may take some time. The Registrar's Office may contact you at the number you gave. If your account is not activated yet, please try again later.</div></div>
   <div class="center" id="pgo"><a class="lk" href="/login">← Back to Log In</a></div>
  {% endif %}
 
  <div class="copy">© Southern Luzon State University — JGE Tagkawayan Campus
-  {% if page == 'login' %}<div class="links"><button type="button" class="lkb" onclick="openTerms()">Terms and Conditions</button><i>·</i><button type="button" class="lkb" onclick="openSurvey()">Client Satisfaction Survey</button></div>{% endif %}</div>
+  {% if page == 'login' %}<div class="links"><button type="button" class="lkb" onclick="openTerms()">Terms and Conditions</button><button type="button" class="lkb" onclick="openSurvey()">Client Satisfaction Survey</button></div>{% endif %}</div>
 </div>
 
 <div class="modal" id="terms"><div class="mbox wide"><button type="button" class="x" onclick="closeTerms()" aria-label="Close">&times;</button>
  <h3 class="ct"><i class="fas fa-file-contract"></i> Terms and Conditions</h3>
  <div class="prose"><p>By creating an account and using the SLSU JGE Tagkawayan Registrar Appointment System you agree to the following:</p>
   <ul>
-   <li><strong>Purpose.</strong> The system is for requesting documents from the Office of the Registrar and scheduling a visit. A booking is a request for a schedule, not a guarantee that your document is ready.</li>
+   <li><strong>Purpose.</strong> The system is for requesting documents from the Office of the Registrar. A request is not a guarantee that your document is ready or will be released.</li>
    <li><strong>Accurate information.</strong> Give true and complete details. False information may lead to rejection or removal of your account.</li>
    <li><strong>Your account.</strong> Registration must be approved by the administrator. Keep your password private; you are responsible for all activity under your account.</li>
    <li><strong>Your own records.</strong> Request only your own records, or records you are authorized to request.</li>
-   <li><strong>Attendance.</strong> Come on your scheduled date and time. Please come on your scheduled date and time so that other students can be served.</li>
    <li><strong>Payment first.</strong> After you send a request, the Registrar prepares an Order of Payment. Pay the fee at the SLSU JGE Campus Cashier (QR code or payment app). Your document is processed only after your payment is confirmed, and you are notified of the claim date.</li>
    <li><strong>Data privacy.</strong> Your information is handled under the Data Privacy Act of 2012 (RA 10173), used only to verify you and process your requests, and seen only by authorized registrar staff and administrators.</li>
    <li><strong>Changes.</strong> The campus may update these terms and may suspend accounts that misuse the system.</li></ul></div>
@@ -1705,7 +1807,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
    {% for c in ['Citizen','Business','Government (Employee or another agency)'] %}<label><input type="radio" name="client_type" value="{{ c }}" required> {{ c }}</label>{% endfor %}</div>
   <div class="csm-row"><b>Date:</b><input type="date" value="{{ today }}" readonly>
    <b>Sex:</b><label><input type="radio" name="sex" value="Male" required> Male</label><label><input type="radio" name="sex" value="Female"> Female</label>
-   <b>Age:</b><input type="number" name="age" min="1" max="120" required style="max-width:90px"></div>
+   <b>Age:</b><input type="number" name="age" min="1" max="120" required style="max-width:80px"></div>
   <div class="csm-row"><b>Region of residence:</b><input type="text" name="region" required maxlength="80" value="Region IV-A (CALABARZON)">
    <b>Service Availed:</b><select name="service" required><option value="">-- select --</option>{% for d in docs %}<option>{{ d }}</option>{% endfor %}<option>Other</option></select></div>
 
@@ -1721,13 +1823,13 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradi
    {% for v, t in [('1','1. Helped very much'),('2','2. Somewhat helped'),('3','3. Did not help'),('4','4. N/A')] %}<label class="opt"><input type="radio" name="cc3" value="{{ v }}" required><span>{{ t }}</span></label>{% endfor %}</div>
 
   <p class="csm-ins"><b>INSTRUCTIONS:</b> For SQD 0-8, please put a check mark (&#10003;) on the column that best corresponds to your answer.</p>
-  {% set opts = [('1','fa-face-angry','Strongly Disagree'),('2','fa-face-frown','Disagree'),('3','fa-face-meh','Neither Agree nor Disagree'),('4','fa-face-smile','Agree'),('5','fa-face-laugh-beam','Strongly Agree'),('NA','','N/A Not Applicable')] %}
-  <table class="sqt"><thead><tr><th></th>{% for v, ic, lb in opts %}<th>{% if ic %}<i class="far {{ ic }}"></i>{% endif %}{{ lb }}</th>{% endfor %}</tr></thead><tbody>
+  {% set opts = [('1','fa-face-angry','Strongly Disagree','Strongly Disagree'),('2','fa-face-frown','Disagree','Disagree'),('3','fa-face-meh','Neither Agree nor Disagree','Neither'),('4','fa-face-smile','Agree','Agree'),('5','fa-face-laugh-beam','Strongly Agree','Strongly Agree'),('NA','','N/A Not Applicable','N/A')] %}
+  <table class="sqt"><thead><tr><th></th>{% for v, ic, lb, sh in opts %}<th>{% if ic %}<i class="far {{ ic }}"></i>{% endif %}{{ lb }}</th>{% endfor %}</tr></thead><tbody>
    {% for q in csm_sqd %}{% set i = loop.index0 %}<tr><td class="q"><b>SQD{{ i }}.</b> {{ q }}</td>
-    {% for v, ic, lb in opts %}<td class="ck"><label data-label="{{ lb }}"><input type="radio" name="sqd{{ i }}" value="{{ v }}" required></label></td>{% endfor %}</tr>{% endfor %}</tbody></table>
+    {% for v, ic, lb, sh in opts %}<td class="ck"><label data-label="{{ sh }}"><i class="far {{ ic or 'fa-circle-question' }} mi"></i><input type="radio" name="sqd{{ i }}" value="{{ v }}" required></label></td>{% endfor %}</tr>{% endfor %}</tbody></table>
 
-  <div class="form-group" style="margin-top:1rem"><label style="color:#111">Suggestions on how we can further improve our services (optional):</label>
-   <textarea class="csm-line" name="suggestions" rows="3" maxlength="1000"></textarea></div>
+  <div class="form-group" style="margin-top:.8rem"><label style="color:#111">Suggestions on how we can further improve our services (optional):</label>
+   <textarea class="csm-line" name="suggestions" rows="2" maxlength="1000"></textarea></div>
   <div class="form-group"><label style="color:#111">Email address (optional):</label><input class="csm-line" type="email" name="email" maxlength="120"></div>
   <p class="csm-ty">THANK YOU!</p>
   <button class="btn btn-full">Submit Survey</button>
@@ -1750,15 +1852,14 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeTerms();closeS
 /* survey: "I do not know what a CC is" answers CC2 and CC3 with N/A */
 document.querySelectorAll('input[name="cc1"]').forEach(r=>r.addEventListener('change',()=>{
  if(r.value==='4'&&r.checked){const a=document.querySelector('input[name="cc2"][value="5"]'),b=document.querySelector('input[name="cc3"][value="4"]');if(a)a.checked=true;if(b)b.checked=true}}));
-document.querySelectorAll('.msg').forEach(m=>{if(m.id==='fp')return;m.style.cursor='pointer';
+document.querySelectorAll('.msg').forEach(m=>{m.style.cursor='pointer';
  setTimeout(()=>{m.style.opacity=0;setTimeout(()=>m.remove(),350)},{{ flash_ms }}+2500);m.addEventListener('click',()=>m.remove())});
 </script>
 {% if page == 'pending' %}<script>
-(function(){const ic=document.getElementById('pic'),tt=document.getElementById('ptt'),tx=document.getElementById('ptx'),go=document.getElementById('pgo'),rm=document.getElementById('prm');
+(function(){const ic=document.getElementById('pic'),tt=document.getElementById('ptt'),tx=document.getElementById('ptx'),go=document.getElementById('pgo');
  function show(ok){ic.className=ok?'fas fa-check-circle':'fas fa-times-circle';
   tt.textContent=ok?'Account Approved!':'Registration Not Approved';
-  tx.textContent=ok?'Good news! The administrator has approved your account. You can now log in and book your appointments.':'Sorry, your registration was not approved. Please visit the Registrars Office, or register again with the correct details.';
-  if(rm)rm.style.display='none';
+  tx.textContent=ok?'Good news! The administrator has approved your account. You can now log in and request your documents.':'Sorry, your registration was not approved. Please visit the Registrar office, or register again with the correct details.';
   go.innerHTML=ok?'<a class="btn btn-full" style="color:#fff" href="/login">Log In Now</a>':'<a class="lk" href="/register">Register again</a>'}
  function chk(){fetch('/register/status',{cache:'no-store'}).then(r=>r.json()).then(d=>{
   if(d.status==='approved'){show(true);clearInterval(t)}else if(d.status==='rejected'){show(false);clearInterval(t)}}).catch(()=>{})}
@@ -1792,11 +1893,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <li><a href="#help">Help</a></li><li><a href="#about">About Us</a></li><li><a href="#quality">Quality Policy</a></li><li><a href="#faqs">FAQs</a></li><li><a href="#terms">Terms of Use</a></li>
    <li><a href="#privacy">Privacy Policy</a></li><li><a href="#contact">Contact Us</a></li></ul></li></ul></nav>
  <div class="user-area">""" + THEME_BTN + """
-  <div class="bellw"><button type="button" class="bell" id="bell" aria-label="Notifications"><i class="fas fa-bell"></i><span class="cnt{{ '' if notifs else ' hid' }}" id="ncnt">{{ notifs|length }}</span></button>
-   <div class="npanel" id="npanel"><div class="nph"><span>Notifications</span><button type="button" id="ndev"><i class="fas fa-mobile-screen-button"></i> Device alerts</button></div>
-    <div class="nlist" id="nlist">{% for n in notifs %}<div class="ni" data-go="{{ n.go }}"><span class="nic {{ n.cls }}"><i class="fas {{ n.icon }}"></i></span><div><b>{{ n.title }}</b><small>{{ n.sub }}</small></div><span class="nw">{{ n.when }}</span></div>
-     {% else %}<div class="nempty"><i class="fas fa-bell-slash"></i><br>You are all caught up</div>{% endfor %}</div>
-    <div class="nfoot" id="nfoot">Notifications disappear after you read them. Tap <b>Device alerts</b> and allow notifications so your phone or computer reminds you about your documents. To change it later, open your device or browser Settings &rarr; Notifications &rarr; this site.</div></div></div>
+  <div class="bellw"><button type="button" class="bell" id="bell" aria-label="Notifications" onclick="sw('notifications')"><i class="fas fa-bell"></i><span class="cnt hid" id="ncnt">0</span></button></div>
   <a href="#profile" class="user-badge" onclick="sw('profile');return false">{% if avatar %}<img class="av" src="{{ avatar }}" alt="">{% else %}<i class="fas fa-user-circle"></i>{% endif %} <span class="un">{{ session.fullname }}</span></a>
   <button type="button" class="dmb" id="dopen" aria-label="Open menu"><i class="fas fa-bars"></i></button></div>
 </header>
@@ -1808,6 +1905,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <a href="#services" data-go="services"><i class="fas fa-file-lines"></i><span>Services</span></a>
   <a href="#book" data-go="book"><i class="fas fa-calendar-plus"></i><span>Book Appointment</span></a>
   <a href="#my-appointments" data-go="my-appointments"><i class="fas fa-calendar-check"></i><span>My Appointments</span></a>
+  <a href="#notifications" data-go="notifications"><i class="fas fa-bell"></i><span>Notifications</span></a>
   <a href="#profile" data-go="profile"><i class="fas fa-user"></i><span>My Profile</span></a>
   <a href="#help" data-go="help"><i class="fas fa-circle-question"></i><span>Help</span></a>
   <a href="#about" data-go="about"><i class="fas fa-building-columns"></i><span>About Us</span></a>
@@ -1824,21 +1922,42 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
  <section id="home" class="section active">
   <div class="banner"><img src="{{ banner }}" alt="" data-fb="{{ bg }}" onerror="fb(this)"></div>
   <h2 class="t">Welcome, {{ greet }}!</h2>
-  <p style="line-height:1.8;margin-bottom:.4rem">Student ID: <strong>{{ session.studentid }}</strong> · Use this portal to request documents and schedule visits to the Office of the Registrar.</p>
+  <p style="line-height:1.8;margin-bottom:.4rem">Student ID: <strong>{{ session.studentid }}</strong> · Use this portal to request documents from the Office of the Registrar.</p>
   <div class="grid">
    <a class="stat" href="#book" onclick="sw('book');return false"><i class="fas fa-calendar-plus"></i><h3 style="font-size:1.1rem">Book Now</h3><p>Fill out the form and submit your request.</p></a>
-   <a class="stat" href="#my-appointments" onclick="sw('my-appointments');return false"><i class="fas fa-history"></i><h3 style="font-size:1.1rem">Track Status</h3><p>{{ active_appts|length }} upcoming · {{ history|length }} completed</p></a>
-   <a class="stat" href="#services" onclick="sw('services');return false"><i class="fas fa-graduation-cap"></i><h3 style="font-size:1.1rem">Services</h3><p>See available documents.</p></a></div>
-  <div class="card prose"><h3 class="ct"><i class="fas fa-laptop-file"></i> About the Student Appointment Portal</h3><p>The SLSU JGE Tagkawayan Registrar Appointment System lets students request documents from the Office of the Registrar and reserve a visit schedule online, so you can skip the long lines. Choose the document you need, pick an available weekday and time slot, and submit your request. Then visit the office on your scheduled date with a valid ID to process and claim your document.</p><p>You can track all your bookings under <strong>My Appointments</strong>, update your details and profile picture in <strong>My Profile</strong>, and find help, FAQs and policies under <strong>More</strong>.</p></div>
+   <a class="stat" href="#my-appointments" onclick="sw('my-appointments');return false"><i class="fas fa-history"></i><h3 style="font-size:1.1rem">Track Status</h3><p>{{ active_appts|length }} in progress · {{ history|length }} completed</p></a>
+   <a class="stat" href="#services" onclick="sw('services');return false"><i class="fas fa-graduation-cap"></i><h3 style="font-size:1.1rem">Services</h3><p>Processing times of requests.</p></a></div>
+  <div class="card prose"><h3 class="ct"><i class="fas fa-laptop-file"></i> About the Student Appointment Portal</h3><p>The SLSU JGE Tagkawayan Registrar Appointment System lets students request documents from the Office of the Registrar online, so you can skip the long lines. Choose the document you need and submit your request. The registrar prepares your Order of Payment, you pay at the cashier, and you are told the claim date. Claim your document with a valid ID.</p><p>You can track all your requests under <strong>My Appointments</strong>, read your updates on the <strong>Notifications</strong> page (the bell), update your details and profile picture in <strong>My Profile</strong>, and find help, FAQs and policies under <strong>More</strong>.</p></div>
   <div class="card prose"><h3 class="ct"><i class="fas fa-building-columns"></i> Office of the University Registrar</h3>
    <p>{{ univ.intro }}</p><ul class="fnlist">{% for f in univ.functions %}<li>{{ f }}</li>{% endfor %}</ul></div>
   <div class="card prose"><h3 class="ct"><i class="fas fa-file-lines"></i> Documents Processed by the Office of the University Registrar</h3>
    <ul class="dlist">{% for d in univ.docs %}{% if d is string %}<li>{{ d }}</li>{% else %}<li><strong>{{ d.title }}</strong>
     {% if d.sub %}<ul>{% for s in d.sub %}<li>{{ s }}</li>{% endfor %}</ul>{% endif %}
     {% if d.steps %}<div class="note"><strong>Instructions:</strong><ol>{% for s in d.steps %}<li>{{ s }}</li>{% endfor %}</ol></div>{% endif %}</li>{% endif %}{% endfor %}</ul></div></section>
+
  <section id="services" class="section"><h2 class="t">Documents &amp; Services</h2>
-  <div class="card svcimg"><a href="{{ svc_img }}" target="_blank" rel="noopener"><img src="{{ svc_img }}" alt="Office of the Campus Registrar - Guidelines on the 7/14/30 days processing time of requests and express lane" onerror="this.parentNode.innerHTML='<p class=&quot;hint&quot;>Put the picture Services.jpg inside the static folder.</p>'"></a>
-   <p class="hint">Tap the picture to enlarge it.</p></div></section>
+  <div class="card">
+   <h3 class="gl-t">OFFICE OF THE CAMPUS REGISTRAR</h3>
+   <div class="gl-h">GUIDELINES ON THE 7/14/30 DAYS PROCESSING TIME OF REQUESTS AND EXPRESS LANE</div>
+   <table class="gtb"><thead>
+    <tr><th colspan="3" class="gbar">PROCESSING TIME OF REQUESTS</th></tr>
+    <tr class="gsub"><th>PROCESSING TIME (UNWC)</th><th>COVERED TRANSACTIONS</th><th>CLAIM DATE COMPUTATION</th></tr></thead><tbody>
+    {% for p in proc %}<tr>
+     <td class="gd" data-label="Processing time">{{ p.days }}</td>
+     <td class="gc" data-label="Covered transactions"><ol>{% for it in p.covers %}<li>{{ it }}</li>{% endfor %}</ol></td>
+     <td data-label="Claim date computation"><p><b>{{ p.rule }}</b></p>
+      <p class="eg"><i>e.g.</i><br>{% for l in p.eg %}{{ l }}<br>{% endfor %}</p>
+      {% if p.footnote %}<p class="fn">{{ p.footnote }}</p><p class="eg">{% for l in p.eg2 %}{{ l }}<br>{% endfor %}</p>{% endif %}</td></tr>{% endfor %}</tbody></table>
+   <div class="gnote"><b>NOTE:</b><ol>{% for n in proc_notes %}<li>{{ n }}</li>{% endfor %}</ol></div>
+   <table class="gtb"><thead>
+    <tr><th colspan="3" class="gbar">EXPRESS LANE (FEE: {{ express.fee }})</th></tr>
+    <tr class="gsub"><th>PROCESSING TIME</th><th>COVERED TRANSACTIONS</th><th>REMARKS</th></tr></thead><tbody>
+    {% for r in express.rows %}<tr>
+     <td class="gd" data-label="Processing time">{{ r.time }}</td>
+     <td class="gc" data-label="Covered transactions"><ol>{% for it in r.covers %}<li>{{ it }}</li>{% endfor %}</ol></td>
+     <td data-label="Remarks">{% if r.bullets %}<ul>{% for b in r.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}{% if r.note %}<p><b>{{ r.note }}</b></p>{% endif %}</td></tr>{% endfor %}</tbody></table>
+  </div></section>
+
  <section id="book" class="section"><h2 class="t">Request a Document</h2>
   <div class="card">
   <form method="POST" action="/book" enctype="multipart/form-data" id="bookForm">
@@ -1863,9 +1982,19 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    {% endif %}
    <div class="form-group"><label>Document to Request *</label><select name="document" required><option value="">-- Select Document --</option>
     {% for d in docs %}<option>{{ d }}</option>{% endfor %}</select></div>
+   <div class="specbox hid" id="specBox"><div class="rq-h"><i class="fas fa-calendar-days"></i> Specify the records you need *</div>
+    <p class="hint" style="margin:-.3rem 0 .9rem">Tell the registrar exactly which semester, school year, year level{% if not is_lhs %} and course{% endif %} the document is for.</p>
+    <div class="g2">
+     <div class="form-group"><label>Semester *</label><select name="semester" disabled><option value="">-- Select --</option>{% for s in semesters %}<option>{{ s }}</option>{% endfor %}</select></div>
+     <div class="form-group"><label>School Year *</label><select name="school_year" disabled><option value="">-- Select --</option>{% for s in school_years %}<option>{{ s }}</option>{% endfor %}</select></div>
+     <div class="form-group"><label>{{ 'Grade Level' if is_lhs else 'Year Level' }} *</label><select name="year_cov" disabled><option value="">-- Select --</option>
+      {% for y in (grades if is_lhs else years_cov) %}<option {{ 'selected' if y==me.get('year_level') }}>{{ y }}</option>{% endfor %}</select></div>
+     {% if not is_lhs %}<div class="form-group"><label>Course / Program *</label><select name="course_cov" disabled><option value="">-- Select --</option>
+      {% for c in courses %}<option {{ 'selected' if c==me.get('course') }}>{{ c }}</option>{% endfor %}</select></div>{% endif %}
+    </div></div>
    <div class="reqbox"><div class="rq-h"><i class="fas fa-clipboard-check"></i> <span id="reqTitle">Requirements checklist</span></div>
     <div class="rq-l" id="reqList"><p class="hint">Select a document above to see what you need to bring.</p></div>
-    <label class="sw"><input type="checkbox" name="agree_req" required> I have read the requirements above and will complete and bring them on my appointment date.</label></div>
+    <label class="sw"><input type="checkbox" name="agree_req" required> I have read the requirements above and will complete and bring them when I claim my document.</label></div>
    <div class="scanbox hid" id="scanBox"><div class="rq-h"><i class="fas fa-camera"></i> Scan the document to be authorized *</div>
     <p class="hint">This document must be authorized by the registrar. Scan every page with your camera (or choose photos). The registrar will print it and authorize it. Up to {{ max_pages }} pages.</p>
     <div class="scanbtn"><button type="button" class="btn btn-sm" id="scCam"><i class="fas fa-camera"></i> Scan with camera</button>
@@ -1876,29 +2005,38 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
     <input type="file" id="scIn2" accept="image/*" multiple class="hid">
     <input type="file" name="scans" id="scOut" multiple class="hid"></div>
    <div class="form-group"><label>Comments / Specifications</label>
-    <textarea name="comment" rows="4" maxlength="500" placeholder="Specify details of the document you are requesting (e.g. number of copies, purpose, school year/semester) or write your concern here."></textarea>
+    <textarea name="comment" rows="4" maxlength="500" placeholder="Specify details of the document you are requesting (e.g. number of copies, purpose) or write your concern here."></textarea>
     <p class="hint">Optional · up to 500 characters</p></div>
    <div class="form-group"><label>Payment Method *</label><select name="payment" required>
     {% for p in payments %}<option {{ 'selected' if loop.length==1 }}>{{ p }}</option>{% endfor %}</select></div>
    {{ payflow() }}
    <div class="form-group"><label>Contact Number *</label><input type="tel" name="contact" required placeholder="09XX-XXX-XXXX" value="{{ me.get('contact','') }}" pattern="[0-9+\\- ]{11,16}"></div>
    <button class="btn">SUBMIT REQUEST</button></form></div></section>
+
  <section id="my-appointments" class="section"><h2 class="t">My Appointments</h2>
   {% if active_appts %}<div class="card tw"><table class="rt"><tr class="hr"><th>#</th><th>Document</th><th>Requested</th><th>Stage</th><th>Claim date</th><th>Comments</th></tr>
-   {% for a in active_appts %}<tr><td data-label="#">{{ loop.index }}</td><td data-label="Document">{{ a.document }}</td><td data-label="Requested">{{ a.sched_label }}</td><td data-label="Stage"><span class="stg {{ 'ok' if a.stage in [ST.paid, ST.ready] else ('blue' if a.stage == ST.proc else '') }}">{{ a.stage or 'Pending' }}</span>{% if a.authorized_at %}<br><span class="stg ok">&#10003; Authorized</span>{% endif %}</td><td data-label="Claim date"><b>{{ a.claim_label or '—' }}</b></td><td class="wrap" data-label="Comments">{{ a.comment or '—' }}</td></tr>{% endfor %}</table></div>
+   {% for a in active_appts %}<tr><td data-label="#">{{ loop.index }}</td><td data-label="Document" class="wrap">{{ a.document }}{% if a.spec_label %}<br><span class="hint">{{ a.spec_label }}</span>{% endif %}</td><td data-label="Requested">{{ a.sched_label }}</td><td data-label="Stage"><span class="stg {{ 'ok' if a.stage in [ST.paid, ST.ready] else ('blue' if a.stage == ST.proc else '') }}">{{ a.stage or 'Pending' }}</span>{% if a.authorized_at %}<br><span class="stg ok">&#10003; Authorized</span>{% endif %}</td><td data-label="Claim date"><b>{{ a.claim_label or '—' }}</b></td><td class="wrap" data-label="Comments">{{ a.comment or '—' }}</td></tr>{% endfor %}</table></div>
   {% else %}<div class="card empty">You have no requests in progress. <a href="#book" onclick="sw('book')" style="color:var(--acc)">Request a document now</a>.</div>{% endif %}
   {% set ns = namespace(pay=false) %}{% for a in active_appts %}{% if a.stage in [ST.prep, ST.unpaid] %}{% set ns.pay = true %}{% endif %}{% endfor %}
   {% if ns.pay %}{{ payflow() }}{% endif %}
-
-  {% if active_appts %}<div class="reqbox"><div class="rq-h"><i class="fas fa-clipboard-check"></i> Reminder: bring these on your appointment date</div>
-   {% for a in active_appts %}{% set key = doc_reqs.get(a.document) %}{% if key %}<div class="rq-key"><div class="rq-kt"><i class="fas fa-triangle-exclamation"></i> Important for {{ a.document }} · {{ a.sched_label }}</div><ul>{% for it in key %}<li>{{ it }}</li>{% endfor %}</ul></div>{% endif %}{% endfor %}
+  {% if active_appts %}<div class="reqbox"><div class="rq-h"><i class="fas fa-clipboard-check"></i> Bring these when you claim your document</div>
+   {% for a in active_appts %}{% set key = doc_reqs.get(a.document) %}{% if key %}<div class="rq-key"><div class="rq-kt"><i class="fas fa-triangle-exclamation"></i> Important for {{ a.document }}</div><ul>{% for it in key %}<li>{{ it }}</li>{% endfor %}</ul></div>{% endif %}{% endfor %}
    </div>{% endif %}
   {% if missed %}<h3 class="sub">Missed Appointments</h3>
   <div class="card tw"><table class="rt"><tr class="hr"><th>#</th><th>Document</th><th>Scheduled</th><th>Status</th></tr>
    {% for a in missed %}<tr><td data-label="#">{{ loop.index }}</td><td data-label="Document">{{ a.document }}</td><td data-label="Scheduled">{{ a.sched_label }} · {{ a.sched_time }}</td><td data-label="Status"><span class="bdg bad">Missed</span></td></tr>{% endfor %}</table></div>{% endif %}
   {% if history %}<h3 class="sub">Completed Transactions</h3>
-  <div class="card tw"><table class="rt"><tr class="hr"><th>#</th><th>Document</th><th>Scheduled</th><th>Completed On</th></tr>
-   {% for a in history %}<tr><td data-label="#">{{ loop.index }}</td><td data-label="Document">{{ a.document }}</td><td data-label="Scheduled">{{ a.sched_label }} · {{ a.sched_time }}</td><td data-label="Completed On"><span class="bdg done">{{ a.completed_at }}</span></td></tr>{% endfor %}</table></div>{% endif %}</section>
+  <div class="card tw"><table class="rt"><tr class="hr"><th>#</th><th>Document</th><th>Requested</th><th>Completed On</th></tr>
+   {% for a in history %}<tr><td data-label="#">{{ loop.index }}</td><td data-label="Document" class="wrap">{{ a.document }}{% if a.spec_label %}<br><span class="hint">{{ a.spec_label }}</span>{% endif %}</td><td data-label="Requested">{{ a.sched_label }}</td><td data-label="Completed On"><span class="bdg done">{{ a.completed_at }}</span></td></tr>{% endfor %}</table></div>{% endif %}</section>
+
+ <section id="notifications" class="section"><h2 class="t">Notifications</h2>
+  <div class="nbar">
+   <div class="nftabs"><button type="button" class="nft active" data-f="all">All <span class="pill" id="nAll">0</span></button>
+    <button type="button" class="nft" data-f="unread">Unread <span class="pill" id="nUnr">0</span></button></div>
+   <div class="nacts"><button type="button" class="btn btn-sm btn-ghost" id="nRead"><i class="fas fa-check-double"></i> Mark all as read</button>
+    <button type="button" class="btn btn-sm btn-ghost" id="ndev"><i class="fas fa-mobile-screen-button"></i> Device alerts</button></div></div>
+  <div id="nPage"></div></section>
+
  <section id="profile" class="section"><h2 class="t">My Profile</h2>
   <div class="card"><h3 class="ct">Profile Information</h3><form method="POST" action="/profile" enctype="multipart/form-data">
    <div class="av-row">
@@ -1922,7 +2060,7 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <div class="g2 pf"><div class="form-group"><label>Email</label><input value="{{ session.email }}" readonly></div>
     <div class="form-group"><label>Student ID</label><input value="{{ session.studentid }}" readonly></div>
     <div class="form-group"><label>Birthday *</label><input type="date" name="birthday" class="bday" required autocomplete="bday" value="{{ me.get('birthday','') }}"></div>
-    <div class="form-group"><label>Contact Number *</label><input type="tel" name="contact" inputmode="tel" required placeholder="09XX-XXX-XXXX" value="{{ me.get('contact','') }}"><p class="hint">Used to text you a code if you forget your password.</p></div>
+    <div class="form-group"><label>Contact Number *</label><input type="tel" name="contact" inputmode="tel" required placeholder="09XX-XXX-XXXX" value="{{ me.get('contact','') }}"><p class="hint">Used to send you a code if you forget your password.</p></div>
     {% if is_lhs %}
     <div class="form-group"><label>Grade Level</label><select name="year_level"><option value="">-- Not set --</option>
      {% for g in grades %}<option {{ 'selected' if g==me.get('year_level') }}>{{ g }}</option>{% endfor %}</select></div>
@@ -1944,27 +2082,28 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
      <div class="form-group"><label>Confirm New Password</label><input type="password" name="confirm" required autocomplete="new-password"></div></div>
     <button class="btn btn-sm btn-ghost">Update Password</button></form></details>
  </section>
+
  <section id="help" class="section"><h2 class="t">Help &amp; Student Guide</h2>
-  <div class="card prose"><h3 class="ct"><i class="fas fa-route"></i> How to book your document, step by step</h3>
+  <div class="card prose"><h3 class="ct"><i class="fas fa-route"></i> How to request your document, step by step</h3>
    <p>Follow these steps to request a document from the Registrar's Office.</p>
    <div class="stp"><div class="n">1</div><div><h4>Open Book Appointment</h4><p>Press <strong>Book Appointment</strong> in the menu. Your name, Student ID, year level and program are already filled in. Check that they are correct.</p></div></div>
    <div class="stp"><div class="n">2</div><div><h4>Choose the document</h4><p>Under <strong>Document to Request</strong>, select the document you need. See <strong>Services</strong> for the processing time of each request.</p></div></div>
-   <div class="stp"><div class="n">3</div><div><h4>Read the important requirements</h4><p>The requirements for that document appear in a highlighted box. Tick each item as you prepare it, then tick the confirmation box below the list.</p></div></div>
-   <div class="stp"><div class="n">4</div><div><h4>Add your comments</h4><p>Optional, but helpful: write the number of copies, the purpose of the request, or the school year / semester you need.</p></div></div>
-   <div class="stp"><div class="n">5</div><div><h4>Scan the document (only if asked)</h4><p>For documents that must be authorized (CAV, Notarization, Certified True Copy of COR, Duplicate Diploma &amp; TOR) a <strong>scanner</strong> appears. Press <strong>Scan with camera</strong>, scan every page, then check the thumbnails. The registrar prints it and authorizes it.</p></div></div>
-   <div class="stp"><div class="n">6</div><div><h4>Enter your contact number and read how payment works</h4><p>Type your mobile number (09XXXXXXXXX). You no longer choose a date or time. Read the <strong>How payment works</strong> box on the form.</p></div></div>
-   <div class="stp"><div class="n">7</div><div><h4>Submit and wait for your Order of Payment</h4><p>Press <strong>Submit Request</strong>. You will find it under <strong>My Appointments</strong>. The registrar prepares your <strong>Order of Payment</strong> and the <strong>bell</strong> beside your profile tells you when it is ready.</p></div></div>
+   <div class="stp"><div class="n">3</div><div><h4>Specify the records (some documents)</h4><p>For documents such as the Summary of Grades or True Copy of Grades, choose the <strong>semester</strong> (1st or 2nd), the <strong>school year</strong>, the <strong>year level</strong> and the <strong>course</strong> you need.</p></div></div>
+   <div class="stp"><div class="n">4</div><div><h4>Read the important requirements</h4><p>The requirements for that document appear in a highlighted box. Tick each item as you prepare it, then tick the confirmation box below the list.</p></div></div>
+   <div class="stp"><div class="n">5</div><div><h4>Scan the document (only if asked)</h4><p>For documents that must be authorized (CAV, Notarization, Certified True Copy of COR, Duplicate Diploma &amp; TOR) a <strong>scanner</strong> appears. Press <strong>Scan with camera</strong>, scan every page, then check the thumbnails.</p></div></div>
+   <div class="stp"><div class="n">6</div><div><h4>Add comments and your contact number</h4><p>Optional: write the number of copies or the purpose. Type your mobile number (09XXXXXXXXX). You do not choose a date or time.</p></div></div>
+   <div class="stp"><div class="n">7</div><div><h4>Submit and wait for your Order of Payment</h4><p>Press <strong>Submit Request</strong>. The registrar prepares your <strong>Order of Payment</strong> and the <strong>bell</strong> beside your profile tells you when it is ready. Open the bell to read all your updates.</p></div></div>
    <div class="stp"><div class="n">8</div><div><h4>Pay, wait for processing and claim</h4><p>Pay the fee at the <strong>SLSU JGE Campus Cashier</strong> (QR code or payment app). When the cashier confirms it, you are notified, the registrar processes your document and tells you the <strong>claim date</strong>. Claim it with your valid ID and receipt. If someone claims for you, bring an authorization letter, a copy of your ID and the representative's valid ID.</p><p class="hint">Office days: {{ cdays }}</p></div></div></div>
   <div class="card prose"><h3 class="ct"><i class="fas fa-circle-question"></i> Common problems</h3>
-   <details><summary>I cannot sign in.</summary><p>Use the Gmail or Student ID you registered with. If you registered recently, your account may still be waiting for approval, so please try again later. Forgot your password? Press <strong>Forgot password?</strong> on the sign-in page, enter your contact number and we will text you a 6-digit code to reset it.</p></details>
-   <details><summary>I paid but my status did not change.</summary><p>The cashier must confirm your payment first. You will get a notification on the bell when it is confirmed. If it takes long, show your receipt or screenshot at the cashier.</p></details>
+   <details><summary>I cannot sign in.</summary><p>Use the Gmail or Student ID you registered with. If you registered recently, your account may still be waiting for approval, so please try again later. Forgot your password? Press <strong>Forgot password?</strong> on the sign-in page and we will send you a 6-digit code.</p></details>
+   <details><summary>I paid but my status did not change.</summary><p>The cashier must confirm your payment first. You will get a notification when it is confirmed. If it takes long, show your receipt or screenshot at the cashier.</p></details>
    <details><summary>I did not get a notification on my phone.</summary><p>Open the bell beside your profile and tap <strong>Device alerts</strong>, then allow notifications. If you blocked it before, open your device or browser Settings, then Notifications, then this site, and allow it.</p></details>
    <details><summary>The system will not let me submit.</summary><p>Check that every required field is filled, your mobile number is valid (09XXXXXXXXX), the requirements confirmation is ticked and, for documents to be authorized, that you scanned at least one page.</p></details>
    <details><summary>I need to change my name, program, grade or section.</summary><p>Update your details in <strong>My Profile</strong> (click your name at the top). For a correction of name or records on official documents, request it from the Services list or visit the office.</p></details>
-
    <details><summary>I need to change or cancel a request.</summary><p>Please contact the Registrar's Office as soon as possible, before you pay.</p></details></div>
   <div class="card prose"><h3 class="ct"><i class="fas fa-headset"></i> Still need help?</h3>
    <p>Read the <a href="#faqs" onclick="sw('faqs')" style="color:var(--acc)">FAQs</a> or see our <a href="#contact" onclick="sw('contact')" style="color:var(--acc)">contact details</a>.</p></div></section>
+
  <section id="about" class="section"><h2 class="t">About Us</h2>
   <div class="banner"><img src="{{ about_banner }}" alt="" data-fb="{{ banner }}|{{ bg }}" onerror="fb(this)"></div>
   <div class="card prose"><p>The Office of the Registrar of Southern Luzon State University – JGE Tagkawayan Campus keeps and issues official student academic records. This appointment system was built to make requesting documents faster, more organized and less crowded for students and registrar staff alike.</p></div>
@@ -1981,7 +2120,8 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
     src="https://www.google.com/maps?q={{ map_q }}&z=16&output=embed"></iframe>
    <div class="mapbtn"><a class="btn btn-sm" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query={{ map_q }}"><i class="fas fa-map"></i> Open in Google Maps</a>
     <a class="btn btn-sm btn-ghost" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination={{ map_q }}"><i class="fas fa-route"></i> Get directions</a></div></div>
-  <div class="card prose"><h3 class="ct"><i class="fas fa-laptop"></i> What the system does</h3><ul><li>Lets students schedule document requests online.</li><li>Gives the registrar a clear list of who is coming, when and for what.</li><li>Limits each time slot so service stays orderly.</li></ul></div></section>
+  <div class="card prose"><h3 class="ct"><i class="fas fa-laptop"></i> What the system does</h3><ul><li>Lets students request documents online.</li><li>Gives the registrar a clear list of who requested what and the stage of each request.</li><li>Keeps payment orderly through the Order of Payment and the campus cashier.</li></ul></div></section>
+
  <section id="quality" class="section"><h2 class="t">Quality Policy</h2>
   <div class="card prose">
    <div class="qp-head">""" + LOGO_HTML + """<h3>SOUTHERN LUZON STATE UNIVERSITY</h3><h4>Quality Policy</h4><p>Patakarang Kalidad ng SLSU</p></div>
@@ -1990,45 +2130,40 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    {% for en, tl in quality['items'] %}<div class="qp-row"><div><p>{{ en }}</p></div><div><p class="tl">{{ tl }}</p></div></div>{% endfor %}
    <div class="qp-sign"><div><b>{{ quality.signer }}</b><span>{{ quality.signer_title }}</span></div>
     <div class="qp-rev"><b style="font-size:.88rem">{{ quality.revision }}</b>{{ quality.effective }}</div></div></div></section>
+
  <section id="faqs" class="section"><h2 class="t">Frequently Asked Questions</h2><div class="card">
   <details><summary>Why can't I log in right after registering?</summary><p>New accounts must be approved by the administrator first. If your account is still pending, please try again later. You can sign in once your account is activated.</p></details>
-  <details open><summary>What is new? (updated October 31, 2026)</summary><p>1) You no longer pick a date or time. 2) After you send a request, the registrar prepares an <strong>Order of Payment</strong>. 3) You pay at the cashier (QR code or payment app) <strong>before</strong> the document is processed. 4) You are notified when the Order of Payment is ready, when your payment is received, while your document is processed and when it can be claimed. 5) The <strong>bell</strong> beside your profile shows these updates and can send alerts to your device. 6) Documents that must be authorized can be <strong>scanned</strong> with your camera. 7) Passwords are recovered with a code texted to your <strong>contact number</strong>.</p></details>
   <details><summary>What is an Order of Payment?</summary><p>It is the sheet the cashier needs to issue your Official Receipt. The registrar prepares it automatically with your name, the document and the fee. You will be notified when it is ready, then you pay at the SLSU JGE Campus Cashier.</p></details>
   <details><summary>How do I pay?</summary><p>Scan the cashier's QR code with GCash, Maya, a bank app or any QR payment app, or pay in cash at the cashier. Keep your receipt or screenshot. The cashier confirms the payment and you receive a notification.</p></details>
-  <details><summary>When will my document be ready?</summary><p>After your payment is confirmed, the registrar processes your request following the 7/14/30 days guidelines in <strong>Services</strong>. The claim date is sent to your bell notifications.</p></details>
+  <details><summary>When will my document be ready?</summary><p>After your payment is confirmed, the registrar processes your request following the 7/14/30 days guidelines in <strong>Services</strong>. The claim date is sent to your Notifications page.</p></details>
+  <details><summary>Where do I see my updates?</summary><p>Tap the <strong>bell</strong> beside your profile. It opens the Notifications page with all updates about your account and documents. New ones are marked <strong>NEW</strong> until you read them.</p></details>
+  <details><summary>How do I request grades of a certain semester?</summary><p>Choose Summary of Grades or True Copy of Grades, then pick the semester (1st or 2nd), the school year, the year level and the course in the box that appears.</p></details>
   <details><summary>How do I scan a document?</summary><p>When you choose a document that must be authorized, a scanner appears in the request form. Press <strong>Scan with camera</strong>, take a clear photo of each page and press Submit. The registrar prints your scan and authorizes it.</p></details>
   <details><summary>Can someone claim my document for me?</summary><p>Yes, with an authorization letter, a copy of your ID and the representative's valid ID.</p></details>
   <details><summary>How do I change my password, details or profile picture?</summary><p>Open <strong>My Profile</strong> by clicking your name at the top of the page.</p></details>
   <details><summary>Where can I see my finished requests?</summary><p>Once the registrar marks your request as done, it moves to <strong>Completed Transactions</strong> under My Appointments, with the date and time it was completed.</p></details>
-
-  <details><summary>Can Laboratory High School students use this portal?</summary><p>Yes. Choose <strong>Laboratory High School Student</strong> when you register and enter your grade level and section. Your requests are listed for the registrar by grade level and section.</p></details>
+  <details><summary>Can Laboratory High School students use this portal?</summary><p>Yes. Choose <strong>Laboratory High School Student</strong> when you register and enter your grade level and section.</p></details>
   <details><summary>Where is the Client Satisfaction Survey?</summary><p>It is on the Log In page, beside <strong>Terms and Conditions</strong>. You can answer it after you sign out, without logging in.</p></details>
-  <details><summary>I forgot my password.</summary><p>Press <strong>Forgot password?</strong> on the sign-in page, enter your contact number and we will text a 6-digit code to that number. Enter the code, then choose a new password. The code works for 10 minutes. If you have no contact number saved, ask the Registrar's Office.</p></details></div></section>
+  <details><summary>I forgot my password.</summary><p>Press <strong>Forgot password?</strong> on the sign-in page, enter your contact number, Gmail or Student ID and we will send a 6-digit code to your phone and/or Gmail. Enter the code, then choose a new password. The code works for 10 minutes.</p></details></div></section>
+
  <section id="terms" class="section"><h2 class="t">Terms of Use</h2><div class="card prose">
-  <p class="hint">Last updated: October 31, 2026</p>
   <p>These Terms of Use govern your use of the SLSU JGE Tagkawayan Registrar Appointment System (the "System"), operated by the Office of the Registrar of Southern Luzon State University – JGE Tagkawayan Campus ("the Campus"). By creating an account or using the System you agree to these terms.</p>
   <h4>1. Who may use the System</h4><p>The System is for currently enrolled college students, Laboratory High School students, and alumni of the Campus. College students must be at least 16 years old and Laboratory High School students at least 11. Users who are minors should use the System with the knowledge and consent of a parent or guardian.</p>
-  <h4>2. Your account</h4><p>Registration must be approved by the Registrar's Office. Until then your account is pending and you should try again later on the Log In page, which shows when your account has been activated. Keep your password private and do not share your account. You are responsible for all activity under your account. Tell the Registrar's Office right away if you think someone else used it.</p>
+  <h4>2. Your account</h4><p>Registration must be approved by the Registrar's Office. Until then your account is pending and you should try again later on the Log In page. Keep your password private and do not share your account. You are responsible for all activity under your account. Tell the Registrar's Office right away if you think someone else used it.</p>
   <h4>3. Accurate information</h4><p>Give true, complete and current information, exactly as in your school records. False or misleading information, or using another person's identity, may lead to rejection, suspension or removal of your account and may be reported to the proper university office.</p>
-  <h4>4. Appointments and document requests</h4><p>A booking is a request for a schedule, not a guarantee that your document is ready or will be released. You do not choose a date or time: the registrar sets your claim date after your payment is confirmed. Request only your own records, or records you are authorized to request.</p>
+  <h4>4. Document requests</h4><p>A request is not a guarantee that your document is ready or will be released. You do not choose a date or time: the registrar sets your claim date after your payment is confirmed. Request only your own records, or records you are authorized to request.</p>
   <h4>5. Requirements, fees and claiming</h4><p>Bring the complete requirements shown for your document and a valid ID. Fees are paid at the SLSU JGE Campus Cashier by QR code, payment app or cash, using the Order of Payment prepared by the registrar. Your document is processed only after your payment is confirmed. Processing times and fees follow the Registrar's policies and the Citizen's Charter and may change without prior notice. A representative may claim a document only with an authorization letter, a copy of your ID and the representative's valid ID.</p>
-  <h4>6. Notifications and text messages</h4><p>The System shows updates about your documents under the bell beside your profile and, if you allow it, as alerts on your device. It may send account activation notices, password reset codes and password-change notices by text message (SMS) to your contact number. Keep your contact number correct.</p>
-  <h4>7. Acceptable use</h4><p>You agree not to: attempt to access other users' data or the admin area; upload harmful, unlawful or offensive content (including profile photos); interfere with, overload or try to break the System; submit false bookings or spam; or use automated tools to send requests. Scan only your own documents or documents you are allowed to submit.</p>
+  <h4>6. Notifications, text messages and e-mail</h4><p>The System shows updates about your documents on the Notifications page (the bell beside your profile) and, if you allow it, as alerts on your device. It may send account activation notices, password reset codes and password-change notices by text message (SMS) to your contact number and password reset codes to your Gmail. Keep your contact details correct.</p>
+  <h4>7. Acceptable use</h4><p>You agree not to: attempt to access other users' data or the admin area; upload harmful, unlawful or offensive content (including profile photos); interfere with, overload or try to break the System; submit false requests or spam; or use automated tools to send requests. Scan only your own documents or documents you are allowed to submit.</p>
   <h4>8. Feedback</h4><p>Answers to the Client Satisfaction Survey on the Log In page may be used by the Campus to improve its services. Answering the survey is optional and anonymous.</p>
   <h4>9. Availability of the System</h4><p>We work to keep the System available, but we do not promise uninterrupted service. It may be unavailable during maintenance, power or internet interruptions, or events beyond our control. For urgent requests, visit the Registrar's Office during office days: {{ cdays }}</p>
   <h4>10. Ownership</h4><p>The System, its design, and the names and seals of Southern Luzon State University belong to the University and its developers. You may not copy or reuse them without permission. Your own records and information remain yours.</p>
   <h4>11. Suspension and termination</h4><p>The Campus may suspend or remove accounts that violate these terms or misuse the System. You may ask the Registrar's Office to close your account at any time.</p>
   <h4>12. Limitation of liability</h4><p>The System is provided "as is". To the extent allowed by law, the Campus is not liable for losses caused by incorrect information you entered, delays outside its control, or unauthorized use of your account caused by your failure to keep your password safe.</p>
-  <h4>13. Changes to these terms</h4><p>The Campus may update these terms from time to time. The date above shows the latest version. Continued use of the System after a change means you accept the updated terms.</p>
-  <h4>14. Recent updates (October 31, 2026)</h4><ul>
-   <li><strong>Order of Payment.</strong> Every request that needs a fee now gets an Order of Payment, prepared by the registrar and the cashier. You pay first, then your document is processed. You are notified at each step.</li>
-   <li><strong>No fixed appointment date.</strong> The registrar gives you a claim date when your document is ready.</li>
-   <li><strong>Scanner.</strong> Documents to be authorized are scanned with your camera. The scans are kept private and are seen only by you and the registrar.</li>
-   <li><strong>Notification bell and device alerts.</strong> Updates disappear after you read them.</li>
-   <li><strong>Contact number.</strong> It is required when you register and is used for account activation and password recovery by text message.</li></ul>
-  <h4>15. Governing law and contact</h4><p>These terms are governed by the laws of the Republic of the Philippines. Questions? Contact the Registrar's Office at {{ cemail }} or see <a href="#contact" onclick="sw('contact')" style="color:var(--acc)">Contact Us</a>.</p></div></section>
+  <h4>13. Changes to these terms</h4><p>The Campus may update these terms from time to time. Continued use of the System after a change means you accept the updated terms.</p>
+  <h4>14. Governing law and contact</h4><p>These terms are governed by the laws of the Republic of the Philippines. Questions? Contact the Registrar's Office at {{ cemail }} or see <a href="#contact" onclick="sw('contact')" style="color:var(--acc)">Contact Us</a>.</p></div></section>
+
  <section id="privacy" class="section"><h2 class="t">Privacy Policy</h2><div class="card prose">
-  <p class="hint">Last updated: October 31, 2026</p>
   <p>The Office of the Registrar of Southern Luzon State University – JGE Tagkawayan Campus respects your privacy. This policy explains what personal information the Registrar Appointment System collects, why, and how it is protected, in line with the Data Privacy Act of 2012 (Republic Act No. 10173) and its Implementing Rules and Regulations.</p>
   <h4>1. Information we collect</h4><ul>
    <li><strong>Account details:</strong> last, first and middle name, Student ID, Gmail address, gender, birthday and age, and your password (stored only in scrambled, hashed form).</li>
@@ -2036,19 +2171,20 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <li><strong>Contact details:</strong> your contact number (required) and, optionally, your address and profile picture.</li>
    <li><strong>Scanned documents:</strong> pages you scan for documents that must be authorized. They are stored privately.</li>
    <li><strong>Payment records:</strong> the Order of Payment (name, document, amount, serial number and payment status). We do not store card or wallet details.</li>
-   <li><strong>Transaction details:</strong> the documents you request, comments, preferred schedule, payment method, and the status of each appointment.</li>
+   <li><strong>Transaction details:</strong> the documents you request, the semester, school year, year level and course you specify, comments, payment method, and the status of each request.</li>
    <li><strong>Survey answers:</strong> your answers to the Client Satisfaction Survey, which is submitted anonymously, including the optional suggestions and email address.</li>
    <li><strong>Technical data:</strong> a session cookie that keeps you signed in, and your theme preference (light or dark) saved on your device.</li></ul>
-  <h4>2. Why we collect it</h4><p>We use your information to verify your identity and approve your account; to schedule and process your document requests; to prepare your Order of Payment, to send you notifications about your account and documents, and password reset codes; to help registrar staff prepare your documents; to answer your concerns; and to improve our services through survey answers and anonymous statistics.</p>
+  <h4>2. Why we collect it</h4><p>We use your information to verify your identity and approve your account; to process your document requests; to prepare your Order of Payment, to send you notifications about your account and documents, and password reset codes; to help registrar staff prepare your documents; to answer your concerns; and to improve our services through survey answers and anonymous statistics.</p>
   <h4>3. Legal basis</h4><p>We process your information because it is necessary to provide the registrar services you request, to carry out the Campus's functions as a state university, and, where needed, with your consent, which you give when you register and use the System.</p>
-  <h4>4. Who can see your information</h4><p>Only authorized Registrar's Office personnel and system administrators. We do not sell, rent or trade your information. We disclose it to other parties only when required by law or by a government agency with authority, such as CHED, or when you ask us to send a document to a third party (for example for authentication).</p>
+  <h4>4. Who can see your information</h4><p>Only authorized Registrar's Office personnel, cashier staff (for the Order of Payment) and system administrators. We do not sell, rent or trade your information. We disclose it to other parties only when required by law or by a government agency with authority, such as CHED, or when you ask us to send a document to a third party (for example for authentication).</p>
   <h4>5. Storage, security and retention</h4><p>Records are kept in a secured database managed by the Campus. We use reasonable organizational, physical and technical safeguards, including hashed passwords, restricted admin access and limited login sessions. We keep your information while your account is active and as long as needed for school records and legal requirements, after which it is deleted or anonymized. No system is completely secure, so please protect your password.</p>
-  <h4>6. Text messages</h4><p>We text your contact number only for account activation notices, the 6-digit password reset code and a notice when your password is changed. We do not send advertising.</p>
+  <h4>6. Text messages and e-mail</h4><p>We text your contact number only for account activation notices, the 6-digit password reset code and a notice when your password is changed. We e-mail your Gmail only the password reset code. We do not send advertising.</p>
   <h4>7. Your rights as a data subject</h4><p>You have the right to be informed; to access and get a copy of your personal data; to correct inaccurate data (you can update most details in My Profile); to object to or withdraw consent to processing; to request blocking, removal or destruction of your data when it is no longer needed or was unlawfully obtained; to data portability; to be indemnified for damages caused by inaccurate or unlawfully used data; and to file a complaint with the National Privacy Commission (privacy.gov.ph).</p>
   <h4>8. Minors</h4><p>Laboratory High School students may be under 18. Their parents or guardians may contact the Registrar's Office to review, correct or delete their child's information.</p>
   <h4>9. Cookies</h4><p>We use only the cookies needed to keep you signed in and to remember your display preference. We do not use advertising or tracking cookies. The Google Map on the About Us page is provided by Google and is subject to Google's own privacy policy.</p>
-  <h4>10. Changes to this policy</h4><p>We may update this policy. The date above shows the latest version, and important changes will be announced in the System.</p>
+  <h4>10. Changes to this policy</h4><p>We may update this policy, and important changes will be announced in the System.</p>
   <h4>11. Contact us</h4><p>To use your rights or ask a privacy question, contact the Registrar's Office at {{ cemail }} or visit us at {{ caddr }}. Office days: {{ cdays }}</p></div></section>
+
  <section id="contact" class="section"><h2 class="t">Contact Us</h2><div class="card prose">
   <p><strong>Office of the Registrar</strong><br>Southern Luzon State University – JGE Tagkawayan Campus</p>
   <ul class="cl">
@@ -2068,11 +2204,15 @@ USER_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <script>
 """ + FLASH_JS + THEME_JS + TOUCH_JS + DATE_JS + """
 const links=document.querySelectorAll('.nav-menu a[href^="#"]'),secs=document.querySelectorAll('.section'),mb=document.getElementById('moreBtn'),dd=document.getElementById('dd');
-function sw(id){if(!document.getElementById(id))id='home';
+let CUR='';
+function sw(id,first){if(!document.getElementById(id))id='home';
  links.forEach(l=>l.classList.toggle('active',l.getAttribute('href')==='#'+id));
  mb.classList.toggle('active',!!dd.querySelector('a[href="#'+id+'"]'));
- secs.forEach(s=>s.classList.toggle('active',s.id===id));dd.classList.remove('open');document.querySelectorAll('#dnav a[data-go]').forEach(l=>l.classList.toggle('active',l.dataset.go===id));
- document.querySelectorAll('.msg').forEach(m=>m.remove());
+ secs.forEach(s=>s.classList.toggle('active',s.id===id));dd.classList.remove('open');
+ document.querySelectorAll('#dnav a[data-go]').forEach(l=>l.classList.toggle('active',l.dataset.go===id));
+ if(!first)document.querySelectorAll('.msg').forEach(m=>m.remove());
+ const prev=CUR;CUR=id;
+ if(prev==='notifications'&&id!=='notifications')markRead();else paintN();
  history.replaceState(null,'','#'+id);
  window.scrollTo(0,0)}
 links.forEach(l=>l.addEventListener('click',e=>{e.preventDefault();sw(l.getAttribute('href').slice(1))}));
@@ -2080,7 +2220,6 @@ mb.addEventListener('click',e=>{e.stopPropagation();dd.classList.toggle('open')}
 document.addEventListener('click',()=>dd.classList.remove('open'));
 document.addEventListener('touchstart',e=>{if(!e.target.closest('.more'))dd.classList.remove('open')},{passive:true});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')dd.classList.remove('open')});
-sw(location.hash.slice(1)||'home');
 
 /* ---- profile picture: pen menu + crop/zoom editor ---- */
 const avIn=document.getElementById('avIn'),avPick=document.getElementById('avPick'),rmAv=document.getElementById('rmAv'),
@@ -2130,33 +2269,35 @@ if(dtm){const pt=()=>{const d=document.documentElement.dataset.theme==='dark';
   dtm.innerHTML=d?'<i class="fas fa-sun"></i><span>Light Mode</span>':'<i class="fas fa-moon"></i><span>Dark Mode</span>'};
  dtm.addEventListener('click',e=>{e.preventDefault();document.getElementById('themeBtn').click();pt()});pt()}
 
-/* ---- notification bell: reading clears the list; device alerts; live updates ---- */
-const NP=document.getElementById('npanel'),NB=document.getElementById('bell'),NC=document.getElementById('ncnt'),NL=document.getElementById('nlist'),
- ND=document.getElementById('ndev'),LOGO={{ logo|tojson }};
-let NSEEN=new Set(),SIG=null,LASTN=[];
+/* ---- notifications page (opened by the bell): list, unread marks, device alerts, live updates ---- */
+const NB=document.getElementById('bell'),NC=document.getElementById('ncnt'),NP=document.getElementById('nPage'),ND=document.getElementById('ndev'),
+ NA=document.getElementById('nAll'),NU=document.getElementById('nUnr'),LOGO={{ logo|tojson }};
+let ITEMS={{ notifs|tojson }},NF='all',NSEEN=new Set(),SIG=null;
 try{NSEEN=new Set(JSON.parse(localStorage.getItem('slsu-seen')||'[]'))}catch(e){}
 function saveSeen(){try{localStorage.setItem('slsu-seen',JSON.stringify([...NSEEN].slice(-200)))}catch(e){}}
 function escH(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function paintN(list){LASTN=list;
- NL.innerHTML=list.length?list.map(n=>'<div class="ni" data-go="'+escH(n.go)+'"><span class="nic '+n.cls+'"><i class="fas '+n.icon+'"></i></span><div><b>'+escH(n.title)+'</b><small>'+escH(n.sub)+'</small></div><span class="nw">'+escH(n.when)+'</span></div>').join('')
-  :'<div class="nempty"><i class="fas fa-bell-slash"></i><br>You are all caught up</div>';
- if(list.length){NC.textContent=list.length;NC.classList.remove('hid')}else NC.classList.add('hid')}
+function paintN(){const un=ITEMS.filter(n=>n.unread),list=NF==='unread'?un:ITEMS;
+ NA.textContent=ITEMS.length;NU.textContent=un.length;
+ NP.innerHTML=list.length?list.map(n=>'<div class="nrow'+(n.unread?' unread':'')+'" data-go="'+escH(n.go)+'"><span class="nic '+n.cls+'"><i class="fas '+n.icon+'"></i></span><div class="nbody"><b>'+escH(n.title)+'</b><p>'+escH(n.sub)+'</p><small>'+escH(n.when)+'</small></div>'+(n.unread?'<span class="nnew">NEW</span>':'')+'</div>').join('')
+  :'<div class="card empty"><i class="fas fa-bell-slash" style="font-size:1.8rem"></i><p style="margin-top:.7rem">'+(NF==='unread'?'No unread notifications.':'You have no notifications yet.')+'</p></div>';
+ const c=CUR==='notifications'?0:un.length;
+ if(c){NC.textContent=c>99?'99+':c;NC.classList.remove('hid')}else NC.classList.add('hid')}
+function markRead(){if(ITEMS.some(n=>n.unread)){fetch('/notifications/clear',{method:'POST'}).catch(()=>{});ITEMS.forEach(n=>{n.unread=false})}paintN()}
+document.querySelectorAll('.nft').forEach(b=>b.addEventListener('click',()=>{NF=b.dataset.f;
+ document.querySelectorAll('.nft').forEach(x=>x.classList.toggle('active',x===b));paintN()}));
+document.getElementById('nRead').addEventListener('click',markRead);
+NP.addEventListener('click',e=>{const r=e.target.closest('.nrow');if(r)sw(r.dataset.go||'my-appointments')});
+window.addEventListener('pagehide',()=>{if(CUR==='notifications'&&ITEMS.some(n=>n.unread)&&navigator.sendBeacon)navigator.sendBeacon('/notifications/clear')});
 function devPaint(){if(!('Notification' in window)){ND.textContent='Not supported';return}
  ND.innerHTML=Notification.permission==='granted'?'<i class="fas fa-check"></i> Device alerts ON':'<i class="fas fa-mobile-screen-button"></i> Device alerts'}
 function devAlert(list){if(!('Notification' in window)||Notification.permission!=='granted')return;
- list.forEach(n=>{if(!NSEEN.has(n.id)){NSEEN.add(n.id);try{new Notification(n.title,{body:n.sub,icon:LOGO})}catch(e){}}});saveSeen()}
-ND.addEventListener('click',e=>{e.stopPropagation();if(!('Notification' in window)){alert('This browser cannot show device alerts.');return}
+ list.forEach(n=>{if(n.unread&&!NSEEN.has(n.id)){NSEEN.add(n.id);try{new Notification(n.title,{body:n.sub,icon:LOGO})}catch(e){}}});saveSeen()}
+ND.addEventListener('click',()=>{if(!('Notification' in window)){alert('This browser cannot show device alerts.');return}
  if(Notification.permission==='denied'){alert('Alerts are blocked. Open your device or browser Settings > Notifications > this site and allow them.');return}
- Notification.requestPermission().then(()=>{devPaint();LASTN.forEach(n=>NSEEN.add(n.id));saveSeen()})});
-function openBell(o){NP.classList.toggle('open',o);
- if(o){fetch('/notifications/clear',{method:'POST'}).catch(()=>{});NC.classList.add('hid')}
- else paintN([])}
-NB.addEventListener('click',e=>{e.stopPropagation();openBell(!NP.classList.contains('open'))});
-document.addEventListener('click',e=>{if(NP.classList.contains('open')&&!e.target.closest('.bellw'))openBell(false)});
-NL.addEventListener('click',e=>{const it=e.target.closest('.ni');if(it){sw(it.dataset.go||'my-appointments');openBell(false)}});
+ Notification.requestPermission().then(()=>{devPaint();ITEMS.forEach(n=>NSEEN.add(n.id));saveSeen()})});
 function pollN(first){fetch('/notifications/poll',{cache:'no-store'}).then(r=>r.json()).then(d=>{
-  if(!NP.classList.contains('open'))paintN(d.items);
-  if(first){d.items.forEach(n=>NSEEN.add(n.id));saveSeen()}else devAlert(d.items);
+  ITEMS=d.items;paintN();
+  if(first){ITEMS.forEach(n=>NSEEN.add(n.id));saveSeen()}else devAlert(ITEMS);
   if(SIG!==null&&d.sig!==SIG&&document.getElementById('my-appointments').classList.contains('active')&&!document.hidden)location.reload();
   SIG=d.sig}).catch(()=>{})}
 devPaint();pollN(true);setInterval(()=>pollN(false),15000);
@@ -2166,7 +2307,7 @@ const AUTH={{ auth_docs|tojson }},MAXP={{ max_pages }},scBox=document.getElement
 let PAGES=[];
 function enhance(cv){const c=cv.getContext('2d'),im=c.getImageData(0,0,cv.width,cv.height),p=im.data,h=new Array(256).fill(0);
  for(let i=0;i<p.length;i+=4){const g=Math.round(p[i]*.299+p[i+1]*.587+p[i+2]*.114);p[i]=g;h[g]++}
- const tot=cv.width*cv.height;let a=0,lo=0,hi=255,s=0;
+ const tot=cv.width*cv.height;let lo=0,hi=255,s=0;
  for(let v=0;v<256;v++){s+=h[v];if(s>tot*.03){lo=v;break}}s=0;for(let v=255;v>=0;v--){s+=h[v];if(s>tot*.25){hi=v;break}}
  const r=Math.max(hi-lo,40);
  for(let i=0;i<p.length;i+=4){let v=(p[i]-lo)*255/r;v=v<0?0:v>255?255:v;p[i]=p[i+1]=p[i+2]=v}
@@ -2186,15 +2327,18 @@ if(scBox){
  document.getElementById('scThumbs').addEventListener('click',e=>{const b=e.target.closest('[data-del]');if(b){PAGES.splice(+b.dataset.del,1);syncScans()}});
  document.getElementById('bookForm').addEventListener('submit',e=>{const d=document.querySelector('select[name="document"]').value;if(AUTH.includes(d)&&!PAGES.length){e.preventDefault();alert('Please scan at least one page of the document first.');scBox.scrollIntoView({behavior:'smooth'})}})}
 
-/* ---- requirements reminder when a document is chosen ---- */
-const REQS={{ reqs|tojson }},DREQ={{ doc_reqs|tojson }},docSel=document.querySelector('select[name="document"]');
+/* ---- requirements checklist + specification box when a document is chosen ---- */
+const REQS={{ reqs|tojson }},DREQ={{ doc_reqs|tojson }},SEMDOCS={{ sem_docs|tojson }},docSel=document.querySelector('select[name="document"]'),specBox=document.getElementById('specBox');
 function reqLi(it){const li=document.createElement('li');
  if(typeof it==='string'){const l=document.createElement('label');l.className='rq';const c=document.createElement('input');c.type='checkbox';
   l.appendChild(c);l.appendChild(document.createTextNode(it));li.appendChild(l)}
  else{const t=document.createElement('div');t.className='rq-t';t.textContent=it.title;li.appendChild(t);
   const u=document.createElement('ul');(it.sub||[]).forEach(x=>u.appendChild(reqLi(x)));li.appendChild(u)}
  return li}
+function toggleSpec(){const on=SEMDOCS.includes(docSel.value);specBox.classList.toggle('hid',!on);
+ specBox.querySelectorAll('select').forEach(s=>{s.disabled=!on;s.required=on})}
 if(docSel)docSel.addEventListener('change',()=>{if(scBox){scBox.classList.toggle('hid',!AUTH.includes(docSel.value))}
+ toggleSpec();
  const box=document.getElementById('reqList'),d=docSel.value,t=document.getElementById('reqTitle');box.innerHTML='';
  if(!d){t.textContent='Requirements checklist';box.innerHTML='<p class="hint">Select a document above to see what you need to bring.</p>';return}
  t.textContent='Requirements for: '+d;
@@ -2204,6 +2348,8 @@ if(docSel)docSel.addEventListener('change',()=>{if(scBox){scBox.classList.toggle
   const ku=document.createElement('ul');key.forEach(x=>ku.appendChild(reqLi(x)));k.appendChild(ku);box.appendChild(k)}
  if(!key.length){const u=document.createElement('ul');REQS.forEach(it=>u.appendChild(reqLi(it)));box.appendChild(u)}
  const p=document.createElement('p');p.className='hint';p.textContent='Tick each item as you prepare it. Incomplete requirements may delay your request.';box.appendChild(p)});
+
+sw(location.hash.slice(1)||'home',true);
 </script></body></html>"""
 
 # ========== ADMIN ==========
@@ -2271,7 +2417,6 @@ ADMIN_CSS = """.adm{display:flex;min-height:100vh}
 .mut{color:var(--mut);font-size:.76rem}
 form.in{display:inline}
 .sbov{display:none}
-/* survey summary bars */
 .br{margin:.7rem 0}
 .br .l{display:flex;justify-content:space-between;gap:.8rem;font-size:.86rem;margin-bottom:.3rem}
 .br .l b{color:var(--acc);white-space:nowrap}
@@ -2289,7 +2434,6 @@ form.in{display:inline}
 }
 @media(max-width:560px){.tiles{grid-template-columns:1fr 1fr}.ax.bx{font-size:17px}.tile{padding:.9rem}.tile i{font-size:1.4rem}}
 @media (hover:none){.si:not(.active):hover{background:transparent;color:var(--mut)}.gres a:hover{background:none}}
-.stg{display:inline-block;padding:.25rem .7rem;border-radius:2rem;font-size:.76rem;font-weight:700;background:var(--warn);color:var(--warnt);line-height:1.3}
 .stf{display:inline-flex;gap:.3rem;align-items:center;flex-wrap:wrap;margin:.2rem 0}
 .stsel,.stdate{width:auto!important;min-height:2.2rem!important;padding:.25rem .5rem!important;font-size:.8rem!important}
 """
@@ -2309,6 +2453,7 @@ ADMIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
  <select class="flt-y"><option value="">All years / grades</option>{% for y in years %}<option>{{ y }}</option>{% endfor %}{% for g in grades %}<option>{{ g }}</option>{% endfor %}</select>{% endif %}
  <span class="hint cnt"></span></div>{% endmacro %}
 {% macro bars(items) %}{% for x in items %}<div class="br"><div class="l"><span>{{ x.label }}</span><b>{{ x.pct }}% <span class="mut">({{ x.n }})</span></b></div><div class="tr"><div class="fl" style="width:{{ x.pct }}%"></div></div></div>{% endfor %}{% endmacro %}
+{% macro doc(a) %}{{ a.document }}{% if a.spec_label %}<span class="mut"><br>{{ a.spec_label }}</span>{% endif %}{% endmacro %}
 {% macro cy(groups, kind) %}
 {% for course, n, yrs in groups %}
 <details class="cg" open><summary><span><i class="fas fa-graduation-cap"></i>&nbsp; {{ course }}</span><span class="pill">{{ n }}</span></summary>
@@ -2316,19 +2461,19 @@ ADMIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
  <div class="yg"><h4 class="yh">{{ year }} <span class="pill">{{ rows|length }}</span></h4>
  <div class="tw"><table class="rt">
   {% if kind == 'active' %}<tr class="hr"><th>Student</th><th>ID</th><th>Document</th><th>Requested</th><th>Stage</th><th>Comments</th><th>Contact</th><th>Action</th></tr>
-  {% for a in rows %}<tr class="dr" data-q="{{ (a.fullname ~ ' ' ~ a.studentid ~ ' ' ~ a.document)|lower }}" data-c="{{ a.course }}" data-y="{{ a.year_level }}"><td data-label="Student">{{ who(a.fullname, a.studentid, a.avatar) }}</td><td data-label="ID">{{ a.studentid }}</td><td data-label="Document" class="wrap">{{ a.document }}</td><td data-label="Requested"><strong>{{ a.sched_label }}</strong></td>
+  {% for a in rows %}<tr class="dr" data-q="{{ (a.fullname ~ ' ' ~ a.studentid ~ ' ' ~ a.document)|lower }}" data-c="{{ a.course }}" data-y="{{ a.year_level }}"><td data-label="Student">{{ who(a.fullname, a.studentid, a.avatar) }}</td><td data-label="ID">{{ a.studentid }}</td><td data-label="Document" class="wrap">{{ doc(a) }}</td><td data-label="Requested"><strong>{{ a.sched_label }}</strong></td>
    <td data-label="Stage" class="wrap"><span class="stg {{ 'ok' if a.stage in [ST.paid, ST.ready] else ('blue' if a.stage == ST.proc else '') }}">{{ a.stage or 'Pending' }}</span>{% if a.claim_label %}<span class="mut"><br>Claim: {{ a.claim_label }}</span>{% endif %}{% if a.authorized_at %}<span class="mut"><br>&#10003; Authorized</span>{% endif %}</td>
    <td class="wrap" data-label="Comments">{{ a.comment or '—' }}</td><td data-label="Contact">{{ a.contact }}</td>
    <td data-label="Action">{% if a.scans %}<button type="button" class="btn btn-sm btn-ghost" data-scan="{{ a.id }}"><i class="fas fa-print"></i> Scans ({{ a.scans|length }})</button>{% endif %}
     <form class="in stf" method="POST" action="/admin/stage"><input type="hidden" name="id" value="{{ a.id }}"><select name="stage" class="stsel"><option value="proc">Being processed</option><option value="ready">Ready for claim</option></select><input type="date" name="claim_date" class="stdate hid"><button class="btn btn-sm btn-ghost">Update</button></form>
     <form class="in" method="POST" action="/admin/complete" onsubmit="return confirm('Mark this request as done (released) and move it to the archive?')"><input type="hidden" name="id" value="{{ a.id }}"><button class="btn btn-sm">✔ Mark Done</button></form></td></tr>{% endfor %}
-  {% elif kind == 'archive' %}<tr class="hr"><th>Student</th><th>ID</th><th>Document</th><th>Scheduled</th><th>Completed On</th><th>Action</th></tr>
-  {% for a in rows %}<tr class="dr" data-q="{{ (a.fullname ~ ' ' ~ a.studentid ~ ' ' ~ a.document)|lower }}" data-c="{{ a.course }}" data-y="{{ a.year_level }}"><td data-label="Student">{{ who(a.fullname, a.studentid, a.avatar) }}</td><td data-label="ID">{{ a.studentid }}</td><td data-label="Document" class="wrap">{{ a.document }}</td><td data-label="Scheduled">{{ a.sched_label }}<span class="mut"><br>{{ a.sched_time }}</span></td><td data-label="Completed On"><span class="bdg done">{{ a.completed_at }}</span></td>
-   <td data-label="Action"><form class="in" method="POST" action="/admin/reopen" onsubmit="return confirm('Move this back to active appointments?')"><input type="hidden" name="id" value="{{ a.id }}"><button class="btn btn-sm btn-ghost">↩ Restore</button></form></td></tr>{% endfor %}
+  {% elif kind == 'archive' %}<tr class="hr"><th>Student</th><th>ID</th><th>Document</th><th>Requested</th><th>Completed On</th><th>Action</th></tr>
+  {% for a in rows %}<tr class="dr" data-q="{{ (a.fullname ~ ' ' ~ a.studentid ~ ' ' ~ a.document)|lower }}" data-c="{{ a.course }}" data-y="{{ a.year_level }}"><td data-label="Student">{{ who(a.fullname, a.studentid, a.avatar) }}</td><td data-label="ID">{{ a.studentid }}</td><td data-label="Document" class="wrap">{{ doc(a) }}</td><td data-label="Requested">{{ a.sched_label }}</td><td data-label="Completed On"><span class="bdg done">{{ a.completed_at }}</span></td>
+   <td data-label="Action"><form class="in" method="POST" action="/admin/reopen" onsubmit="return confirm('Move this back to active requests?')"><input type="hidden" name="id" value="{{ a.id }}"><button class="btn btn-sm btn-ghost">↩ Restore</button></form></td></tr>{% endfor %}
   {% elif kind == 'missed' %}<tr class="hr"><th>Student</th><th>ID</th><th>Document</th><th>Scheduled</th><th>Status</th><th>Action</th></tr>
-  {% for a in rows %}<tr class="dr" data-q="{{ (a.fullname ~ ' ' ~ a.studentid ~ ' ' ~ a.document)|lower }}" data-c="{{ a.course }}" data-y="{{ a.year_level }}"><td data-label="Student">{{ who(a.fullname, a.studentid, a.avatar) }}</td><td data-label="ID">{{ a.studentid }}</td><td data-label="Document" class="wrap">{{ a.document }}</td><td data-label="Scheduled">{{ a.sched_label }}<span class="mut"><br>{{ a.sched_time }}</span></td><td data-label="Status"><span class="bdg bad">Missed</span></td>
-   <td data-label="Action"><form class="in" method="POST" action="/admin/attended" onsubmit="return confirm('The student actually attended? This moves it to the archive as completed and removes the missed mark.')"><input type="hidden" name="id" value="{{ a.id }}"><button class="btn btn-sm">✔ Attended</button></form>
-    <form class="in" method="POST" action="/admin/excuse" onsubmit="return confirm('Excuse this absence? It will no longer count toward the 3 missed appointments.')"><input type="hidden" name="id" value="{{ a.id }}"><button class="btn btn-sm btn-ghost">Excuse</button></form></td></tr>{% endfor %}
+  {% for a in rows %}<tr class="dr" data-q="{{ (a.fullname ~ ' ' ~ a.studentid ~ ' ' ~ a.document)|lower }}" data-c="{{ a.course }}" data-y="{{ a.year_level }}"><td data-label="Student">{{ who(a.fullname, a.studentid, a.avatar) }}</td><td data-label="ID">{{ a.studentid }}</td><td data-label="Document" class="wrap">{{ doc(a) }}</td><td data-label="Scheduled">{{ a.sched_label }}<span class="mut"><br>{{ a.sched_time }}</span></td><td data-label="Status"><span class="bdg bad">Missed</span></td>
+   <td data-label="Action"><form class="in" method="POST" action="/admin/attended" onsubmit="return confirm('The student actually came? This moves it to the archive as completed.')"><input type="hidden" name="id" value="{{ a.id }}"><button class="btn btn-sm">✔ Attended</button></form>
+    <form class="in" method="POST" action="/admin/excuse" onsubmit="return confirm('Excuse this absence?')"><input type="hidden" name="id" value="{{ a.id }}"><button class="btn btn-sm btn-ghost">Excuse</button></form></td></tr>{% endfor %}
   {% else %}<tr class="hr"><th>Student</th><th>ID</th><th>Gmail</th><th>Gender</th><th>Contact</th><th>Action</th></tr>
   {% for u in rows %}<tr class="dr" data-q="{{ (u.fullname ~ ' ' ~ u.studentid ~ ' ' ~ u.email)|lower }}" data-c="{{ u.course }}" data-y="{{ u.year_level }}"><td data-label="Student">{{ who(u.fullname, u.studentid, u.avatar) }}</td><td data-label="ID">{{ u.studentid }}</td><td data-label="Gmail">{{ u.email }}</td><td data-label="Gender">{{ u.gender }}</td><td data-label="Contact">{{ u.contact or '—' }}</td>
    <td data-label="Action"><button type="button" class="btn btn-sm btn-ghost" data-sid="{{ u.studentid }}"><i class="fas fa-id-card"></i> View / Edit</button></td></tr>{% endfor %}
@@ -2348,7 +2493,6 @@ ADMIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <a class="si" data-tab="accounts" href="#accounts"><i class="fas fa-user-clock"></i> Pending Accounts <span class="bd2">{{ total_pending }}</span></a>
   <a class="si" data-tab="users-list" href="#users-list"><i class="fas fa-user-graduate"></i> Students <span class="bd2">{{ total_approved }}</span></a>
   <a class="si" data-tab="feedback-list" href="#feedback-list"><i class="fas fa-chart-pie"></i> Survey Results <span class="bd2">{{ csm.n }}</span></a>
-  <a class="si" href="/orderpay"><i class="fas fa-receipt"></i> Order of Payment</a>
  </nav>
  <div class="sb-foot">
   <a href="/logout" class="si" style="color:#c62828"><i class="fas fa-right-from-bracket"></i> Sign Out</a></div>
@@ -2364,34 +2508,32 @@ ADMIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
  <div class="content">
  {% for cat, m in get_flashed_messages(with_categories=true) %}<div class="msg {{ cat }}">{{ m }}</div>{% endfor %}
 
-
  <div class="tab-content active" id="overview">
   <div class="pn"><h3>Admin Dashboard</h3>
    <div class="tiles">
     <div class="tile t1"><div><small>Students</small><b>{{ total_approved }}</b></div><i class="fas fa-user-graduate"></i></div>
     <div class="tile t2"><div><small>Pending Accounts</small><b>{{ total_pending }}</b></div><i class="fas fa-user-clock"></i></div>
-    <div class="tile t3"><div><small>Active Appointments</small><b>{{ all_count }}</b></div><i class="fas fa-calendar-check"></i></div>
+    <div class="tile t3"><div><small>Active Requests</small><b>{{ all_count }}</b></div><i class="fas fa-calendar-check"></i></div>
     <div class="tile t4"><div><small>Completed</small><b>{{ archive_count }}</b></div><i class="fas fa-circle-check"></i></div></div></div>
   <div class="two">
-   <div class="pn"><h3>Appointments Overview <span class="lg"><i class="dt" style="background:#f2a33a"></i>Pending<i class="dt" style="background:#2e9d68"></i>Completed</span></h3>
+   <div class="pn"><h3>Requests Overview <span class="lg"><i class="dt" style="background:#f2a33a"></i>In progress<i class="dt" style="background:#2e9d68"></i>Completed</span></h3>
     <svg id="barc" viewBox="0 0 640 250" style="width:100%;height:auto"></svg></div>
    <div class="pn"><h3>Students</h3><div class="dn"><svg id="donut" viewBox="0 0 180 180" style="width:190px;height:190px"></svg>
     <div class="leg"><span><i class="dt" style="background:#2e9d68;margin-left:0"></i>College · {{ donut.college }}</span><span><i class="dt" style="background:#f2a33a"></i>Laboratory HS · {{ donut.lhs }}</span></div></div></div></div>
   <div class="two">
-   <div class="pn"><h3>Recent Appointments <span class="lg">Latest 50 · click a name to open the profile</span></h3>
+   <div class="pn"><h3>Recent Requests <span class="lg">Latest 50 · click a name to open the profile</span></h3>
     {% if recent %}{{ filters('blk-recent', 'Search by student name or ID…', false) }}
     <div id="blk-recent" class="tw scroll"><table class="rt"><tr class="hr"><th>Student</th><th>ID</th><th>Document</th><th>Date</th><th>Status</th></tr>
-     {% for a in recent %}<tr class="dr" data-q="{{ (a.fullname ~ ' ' ~ a.studentid)|lower }}"><td data-label="Student">{{ who(a.fullname, a.studentid, a.avatar) }}</td><td data-label="ID">{{ a.studentid }}</td><td data-label="Document" class="wrap">{{ a.document }}</td><td data-label="Date">{{ a.sched_label }}</td><td data-label="Status"><span class="bdg {{ {'Completed': 'done', 'Pending': 'pend'}.get(a.status, 'bad') }}">{{ a.status }}</span></td></tr>{% endfor %}</table>
-     <div class="empty nores" style="display:none">No appointments match that name.</div></div>
-    {% else %}<div class="empty">No appointments yet.</div>{% endif %}</div>
+     {% for a in recent %}<tr class="dr" data-q="{{ (a.fullname ~ ' ' ~ a.studentid)|lower }}"><td data-label="Student">{{ who(a.fullname, a.studentid, a.avatar) }}</td><td data-label="ID">{{ a.studentid }}</td><td data-label="Document" class="wrap">{{ doc(a) }}</td><td data-label="Date">{{ a.sched_label }}</td><td data-label="Status"><span class="bdg {{ {'Completed': 'done', 'Pending': 'pend'}.get(a.status, 'bad') }}">{{ a.status }}</span></td></tr>{% endfor %}</table>
+     <div class="empty nores" style="display:none">No requests match that name.</div></div>
+    {% else %}<div class="empty">No requests yet.</div>{% endif %}</div>
    <div class="pn"><h3>Recent Activity</h3>
     {% for x in activity %}<div class="act"><span class="ai {{ x.cls }}"><i class="fas {{ x.icon }}"></i></span><div><b>{{ x.title }}</b><small>{{ x.sub }}</small></div><span class="when">{{ x.when }}</span></div>
     {% else %}<div class="empty" style="padding:1.5rem">No activity yet.</div>{% endfor %}
     <button type="button" class="btn btn-full" style="margin-top:.9rem;background:var(--soft);color:var(--acc)" onclick="go('all-appointments')">View All</button></div></div>
  </div>
 
- <div class="tab-content" id="missed"><h2 class="t">Missed Appointments <small style="font-size:.7em;color:var(--mut);font-weight:500">· students who did not attend their schedule</small></h2>
-  <div class="alert"><i class="fas fa-circle-info"></i><div>A pending appointment is moved here automatically after its scheduled day. Use <strong>Attended</strong> if the student did come, or <strong>Excuse</strong> for a valid reason; both remove it from this list.</div></div>
+ <div class="tab-content" id="missed"><h2 class="t">Missed Appointments</h2>
   {% if missed_groups %}<div class="pn" style="padding-bottom:.4rem">{{ filters('blk-missed', 'Search by student name, ID or document…', true) }}</div>
   <div id="blk-missed">{{ cy(missed_groups, 'missed') }}<div class="pn empty nores" style="display:none">No matching records found.</div></div>
   {% else %}<div class="pn empty">No missed appointments.</div>{% endif %}</div>
@@ -2405,8 +2547,8 @@ ADMIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 
  <div class="tab-content" id="all-appointments"><h2 class="t">Document Requests <small style="font-size:.7em;color:var(--mut);font-weight:500">· by program &amp; year / grade &amp; section</small></h2>
   {% if active_groups %}<div class="pn" style="padding-bottom:.4rem">{{ filters('blk-active', 'Search by student name, ID or document…', true) }}</div>
-  <div id="blk-active">{{ cy(active_groups, 'active') }}<div class="pn empty nores" style="display:none">No matching appointments found.</div></div>
-  {% else %}<div class="pn empty">No active appointments.</div>{% endif %}</div>
+  <div id="blk-active">{{ cy(active_groups, 'active') }}<div class="pn empty nores" style="display:none">No matching requests found.</div></div>
+  {% else %}<div class="pn empty">No active requests.</div>{% endif %}</div>
 
  <div class="tab-content" id="archive"><h2 class="t">Archive — Completed Transactions <small style="font-size:.7em;color:var(--mut);font-weight:500">· by program &amp; year / grade &amp; section</small></h2>
   {% if archive_groups %}<div class="pn" style="padding-bottom:.4rem">{{ filters('blk-archive', 'Search history by student name, ID or document…', true) }}</div>
@@ -2450,10 +2592,10 @@ ADMIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
  <div id="pmView">
   <div class="pm-head"><div id="pmAv"></div><div><h3 id="pmName"></h3><p class="hint" id="pmSub"></p></div></div>
   <dl class="pm-grid" id="pmGrid"></dl>
-  <h4 style="color:var(--acc);margin-bottom:.4rem">Appointments</h4><div id="pmAppts"></div>
+  <h4 style="color:var(--acc);margin-bottom:.4rem">Requests</h4><div id="pmAppts"></div>
   <div class="mbtn" style="justify-content:flex-start"><button type="button" class="btn btn-sm" id="pmEdit"><i class="fas fa-pen"></i> Edit / correct information</button></div></div>
  <form id="pmForm" class="hid" method="POST" action="/admin/student/update">
-  <h3 style="color:var(--acc);margin-bottom:.4rem">Edit student information</h3><p class="hint" style="margin-bottom:1rem">Correct wrong data the student entered. Changes also update the student's name and program on their appointments.</p>
+  <h3 style="color:var(--acc);margin-bottom:.4rem">Edit student information</h3><p class="hint" style="margin-bottom:1rem">Correct wrong data the student entered. Changes also update the student's name and program on their requests.</p>
   <input type="hidden" name="orig" id="fOrig">
   <div class="g3"><div class="form-group"><label>Last name</label><input name="last_name" id="fLn" required maxlength="60"></div>
    <div class="form-group"><label>First name</label><input name="first_name" id="fFn" required maxlength="60"></div>
@@ -2470,7 +2612,6 @@ ADMIN_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <div class="g2"><div class="form-group"><label>Contact number</label><input name="contact" id="fCt" placeholder="09XXXXXXXXX (leave empty to remove)"></div>
    <div class="form-group"><label>Address</label><input name="address" id="fAd" maxlength="200" placeholder="Leave empty to remove"></div></div>
   <label class="sw"><input type="checkbox" name="remove_avatar"> Remove the profile photo</label>
-
   <div class="mbtn" style="justify-content:flex-end"><button type="button" class="btn btn-sm btn-ghost" id="pmCancel">Cancel</button><button class="btn btn-sm">Save changes</button></div></form>
 </div></div>
 <script>
@@ -2535,8 +2676,8 @@ function openProfile(sid){const p=PROFILES[sid];if(!p)return;CUR=p;pf.classList.
   .concat([['Contact number',p.contact],['Address',p.address]]);
  rows.forEach(r=>{g.appendChild(mk('dt','',r[0]));g.appendChild(mk('dd','',r[1]||'—'))});
  const ap=document.getElementById('pmAppts');ap.innerHTML='';
- if(!p.appts.length)ap.appendChild(mk('p','hint','No appointments yet.'));
- p.appts.forEach(a=>ap.appendChild(mk('div','pm-ap',a.document+' — '+a.date+' · '+a.time+' ['+a.status+']')));
+ if(!p.appts.length)ap.appendChild(mk('p','hint','No requests yet.'));
+ p.appts.forEach(a=>ap.appendChild(mk('div','pm-ap',a.document+(a.spec?' ('+a.spec+')':'')+' — '+a.date+' ['+a.status+']')));
  pm.classList.add('open')}
 function fLvT(){const l=document.getElementById('fLv').value==='lhs';
  [['fCol',!l],['fLhs',l]].forEach(a=>{const b=document.getElementById(a[0]);b.classList.toggle('hid',!a[1]);
@@ -2570,7 +2711,7 @@ gi.addEventListener('input',()=>{const q=gi.value.trim().toLowerCase();gr.innerH
 document.addEventListener('click',e=>{if(!e.target.closest('.gs'))gr.classList.remove('open')});
 </script></body></html>"""
 
-# ========== ORDER OF PAYMENT (Appendix 28) - cashier / staff interface ==========
+# ========== ORDER OF PAYMENT (Appendix 28) - cashier interface (the Order of Payment account only) ==========
 # Orders are created automatically when a student sends a request. Staff: check -> edit -> print -> archive,
 # then confirm the payment. Every change is copied to EXPORT_DIR / EXPORT_WEBHOOK_URL (drive or other server).
 ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
@@ -2589,7 +2730,6 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 .sts{display:inline-block;padding:.18rem .65rem;border-radius:2rem;font-size:.72rem;font-weight:700;white-space:nowrap}
 .sts.n{background:var(--warn);color:var(--warnt)}.sts.i{background:#d9eefb;color:#1f6fa5}.sts.p{background:#dcf5e3;color:#1b7a43}
 [data-theme=dark] .sts.i{background:#17303f;color:#8cc8f0}[data-theme=dark] .sts.p{background:#163324;color:#8be0ac}
-.bellw{position:relative}
 .opw{display:grid;grid-template-columns:minmax(300px,400px) minmax(0,1fr);gap:1.2rem;align-items:start}
 .opw .pn{margin-bottom:1rem}.opw .form-group{margin-bottom:.8rem}
 .prevwrap{background:#cfd6d2;border-radius:14px;padding:1rem;overflow:auto;position:sticky;top:76px;max-height:calc(100vh - 100px)}
@@ -2607,6 +2747,9 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 .fees td input[type=number],.fees td input[type=text]{min-height:2.3rem;padding:.35rem .6rem;font-size:.85rem}
 .fees td{white-space:normal}
 .fees td.chk{text-align:center}.fees td.chk input{width:auto;min-height:0}
+.filtbar input[type=date]{width:auto;min-width:150px}
+.prev{background:var(--row);border:1px solid var(--bd);border-radius:10px;padding:1rem;font-size:.78rem;line-height:1.5;white-space:pre;overflow:auto;max-height:460px;color:var(--tx);font-family:Consolas,'Courier New',monospace}
+.hsum{font-size:.8rem;color:var(--mut)}
 /* ---------- the Order of Payment sheet (always black on white, same layout as the printed form) ---------- */
 .sheet{display:grid;background:#fff;color:#000;border:1.5px solid #000;border-top:0;font-family:'Times New Roman',Times,serif;margin:0 auto}
 .sheet.noframe,.sheet.noframe .opc{border-color:transparent}
@@ -2633,9 +2776,8 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 .opc table.bk tr:hover td{background:#fff}
 .opc .tot{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;margin-top:6px}
 .opc .tot b{font-weight:700}.opc .tot .tv{min-width:42%;border-bottom:1px solid #000;text-align:right;min-height:1.5em}
-.opc .sg{margin-top:auto;padding-top:34px;text-align:center}
-.opc .sg .sl{border-top:1px solid #000;margin:0 6%}
-.opc .sg b{display:block;padding-top:2px}
+.opc .sg{margin-top:auto;padding-top:38px;text-align:center}
+.opc .sg b{display:block;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
 .opc .sg span{display:block;font-size:.95em}
 @media(max-width:1100px){.opw{grid-template-columns:1fr}.prevwrap{position:static;max-height:none}}
 @media print{
@@ -2660,12 +2802,9 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <a class="si" data-tab="sheet" href="#sheet"><i class="fas fa-print"></i> Order Sheet &amp; Print</a>
   <a class="si" data-tab="fees" href="#fees"><i class="fas fa-peso-sign"></i> Documents &amp; Fees</a>
   <a class="si" data-tab="archive" href="#archive"><i class="fas fa-box-archive"></i> Archive <span class="bd2" id="bdArc">0</span></a>
-  <a class="si" href="/orderpay/export.csv"><i class="fas fa-file-csv"></i> Download CSV</a>
-  <a class="si" href="/orderpay/export.json"><i class="fas fa-file-code"></i> Download JSON</a>
+  <a class="si" data-tab="history" href="#history"><i class="fas fa-clock-rotate-left"></i> Transaction History</a>
  </nav>
- <div class="sb-foot">
-  {% if is_admin %}<a href="/admin" class="si"><i class="fas fa-arrow-left"></i> Admin dashboard</a>{% endif %}
-  <a href="/logout" class="si" style="color:#c62828"><i class="fas fa-right-from-bracket"></i> Sign Out</a></div>
+ <div class="sb-foot"><a href="/logout" class="si" style="color:#c62828"><i class="fas fa-right-from-bracket"></i> Sign Out</a></div>
 </aside>
 <div class="sbov noprint" id="sbov"></div>
 <div class="mainc">
@@ -2677,12 +2816,12 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
    <div class="npanel" id="npanel"><div class="nph"><span>New Orders of Payment</span><button type="button" id="ndev"><i class="fas fa-mobile-screen-button"></i> Device alerts</button></div>
     <div class="nlist" id="nlist"></div></div></div>
   """ + THEME_BTN + """
-  <div class="who"><span class="avi"><i class="fas fa-cash-register"></i></span><span><b>{{ 'Administrator' if is_admin else 'Cashier / Staff' }}</b><small>Order of Payment</small></span></div>
+  <div class="who"><span class="avi"><i class="fas fa-cash-register"></i></span><span><b>Cashier / Staff</b><small>Order of Payment</small></span></div>
  </header>
  <div class="content">
 
  <div class="tab-content active" id="inbox"><h2 class="t">New Orders of Payment <small style="font-size:.7em;color:var(--mut);font-weight:500">· created automatically when a student sends a request</small></h2>
-  <div class="alert"><i class="fas fa-circle-info"></i><div>Click an order to check it. The student's name, the amount and the "For payment of" are already filled in. Fix anything that is wrong, then print it. After printing it goes to the <strong>Archive</strong> where you confirm the payment.</div></div>
+  <div class="alert"><i class="fas fa-circle-info"></i><div>Click an order to check it. The student's name, the amount and the "For payment of" are already filled in. Fix anything that is wrong, then print it. After printing it goes to the <strong>Archive</strong> where you confirm the payment. The bell only shows orders that are not printed yet.</div></div>
   <div class="pn"><div class="filtbar"><button type="button" class="btn btn-sm" id="btnBlank"><i class="fas fa-plus"></i> New blank order (walk-in)</button><span class="hint" id="inboxCnt"></span></div>
    <div id="inboxList"></div></div></div>
 
@@ -2742,6 +2881,22 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
     <select id="arcSt"><option value="">All</option><option value="Issued">Awaiting payment</option><option value="Paid">Paid</option></select><span class="hint" id="arcCnt"></span></div>
    <div id="arcList"></div>
    <p class="hint" id="syncInfo" style="margin-top:.8rem"></p></div></div>
+
+ <div class="tab-content" id="history"><h2 class="t">Transaction History <small style="font-size:.7em;color:var(--mut);font-weight:500">· check the records first, then download</small></h2>
+  <div class="pn"><div class="tiles" id="hTiles"></div></div>
+  <div class="pn">
+   <div class="filtbar"><div class="sbx"><i class="fas fa-search"></i><input type="search" id="hQ" placeholder="Search by name, document, purpose or serial no…"></div>
+    <select id="hSt"><option value="">All status</option><option value="New">New</option><option value="Issued">Awaiting payment</option><option value="Paid">Paid</option></select>
+    <input type="date" id="hFrom" title="From date"><input type="date" id="hTo" title="To date"><span class="hint" id="hCnt"></span></div>
+   <div class="nbar"><div class="nftabs"><button type="button" class="nft active" data-hv="table"><i class="fas fa-table"></i> Records</button>
+     <button type="button" class="nft" data-hv="csv"><i class="fas fa-file-csv"></i> CSV preview</button>
+     <button type="button" class="nft" data-hv="json"><i class="fas fa-file-code"></i> JSON preview</button></div>
+    <div class="nacts"><button type="button" class="btn btn-sm" id="hPdf"><i class="fas fa-file-pdf"></i> Download PDF</button>
+     <button type="button" class="btn btn-sm btn-ghost" id="hCsvDl"><i class="fas fa-download"></i> CSV</button>
+     <button type="button" class="btn btn-sm btn-ghost" id="hJsonDl"><i class="fas fa-download"></i> JSON</button></div></div>
+   <div id="hvTable" class="tw"><table class="rt"><thead><tr class="hr"><th>Serial No.</th><th>Date</th><th>Name of Payor</th><th>Document</th><th>Amount</th><th>Status</th><th>Printed</th><th>Paid</th></tr></thead><tbody id="hBody"></tbody></table></div>
+   <pre class="prev hid" id="hvCsv"></pre><pre class="prev hid" id="hvJson"></pre>
+   <p class="hint" style="margin-top:.8rem">The PDF, CSV and JSON contain exactly the records that match the filters above. Click a record to open its Order of Payment.</p></div></div>
  </div>
 </div>
 <div class="modal noprint" id="arcM"><div class="mbox wide xl"><button type="button" class="x" id="arcX" aria-label="Close">&times;</button>
@@ -2764,7 +2919,7 @@ function words(n){n=Math.round(n*100)/100;if(!(n>0))return '';let p=Math.floor(n
  while(p>0){const t=p%1000;if(t)parts.unshift(w3(t)+SCALE[i]);p=Math.floor(p/1000);i++}
  let s=parts.join(' ')+(whole===1?' PESO':' PESOS');if(c)s+=' AND '+(c<10?'0':'')+c+'/100';return s+' ONLY'}
 const STN={New:['New · needs checking','n'],Issued:['Printed · awaiting payment','i'],Paid:['Paid','p']};
-let D={orders:[],fees:{},docs:[],sync:{}},CUR=null,PREV=null,saveT=null,feesDirty=false,linkBank=true,AM=null;
+let D={orders:[],fees:{},docs:[],sync:{}},CUR=null,PREV=null,saveT=null,feesDirty=false,linkBank=true,AM=null,HV='table',HT=null,HSIG='';
 function toast(t){const e=$('toast');e.textContent=t;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2600)}
 function beep(){try{const A=new (window.AudioContext||window.webkitAudioContext)(),o=A.createOscillator(),g=A.createGain();o.connect(g);g.connect(A.destination);
  o.type='sine';o.frequency.value=880;g.gain.setValueAtTime(.2,A.currentTime);g.gain.exponentialRampToValueAtTime(.001,A.currentTime+.5);o.start();o.stop(A.currentTime+.5)}catch(e){}}
@@ -2774,7 +2929,8 @@ async function api(url,body){const r=await fetch(url,{method:'POST',headers:{'Co
 /* ---- tabs / sidebar ---- */
 const tabs=document.querySelectorAll('.si[data-tab]'),cs=document.querySelectorAll('.tab-content');
 function go(id){if(!$(id))id='inbox';tabs.forEach(t=>t.classList.toggle('active',t.dataset.tab===id));cs.forEach(c=>c.classList.toggle('active',c.id===id));
- history.replaceState(null,'','#'+id);document.body.classList.remove('sbo');window.scrollTo(0,0);if(id==='sheet')applyPrint()}
+ history.replaceState(null,'','#'+id);document.body.classList.remove('sbo');window.scrollTo(0,0);
+ if(id==='sheet')applyPrint();if(id==='history')paintHistory(true)}
 tabs.forEach(t=>t.addEventListener('click',e=>{e.preventDefault();go(t.dataset.tab)}));
 document.addEventListener('click',e=>{const a=e.target.closest('[data-go]');if(a){e.preventDefault();go(a.dataset.go)}});
 $('hamb').addEventListener('click',()=>document.body.classList.add('sbo'));$('sbov').addEventListener('click',()=>document.body.classList.remove('sbo'));
@@ -2784,27 +2940,30 @@ const byId=id=>D.orders.find(o=>o.id===id);
 function load(){return fetch('/orderpay/data',{cache:'no-store'}).then(r=>r.json()).then(d=>{D=d;paintAll();
   if(PREV!==null&&d.new>PREV){beep();toast('New Order of Payment received');devNote(d)}
   PREV=d.new;document.title=(d.new?'('+d.new+') ':'')+'Order of Payment — SLSU JGE'}).catch(()=>{})}
+function unprinted(){return D.orders.filter(o=>o.status==='New'&&!o.printed_at)}
 function devNote(d){if(!('Notification' in window)||Notification.permission!=='granted')return;
- const n=d.orders.filter(o=>o.status==='New')[0];if(n)try{new Notification('New Order of Payment',{body:(n.payor||'A student')+' · '+(n.document||'')})}catch(e){}}
-function paintAll(){paintInbox();paintBell();paintArchive();if(!feesDirty)paintFees();
- $('bdNew').textContent=D.new;$('bdArc').textContent=D.orders.filter(o=>o.status!=='New').length}
+ const n=d.orders.filter(o=>o.status==='New'&&!o.printed_at)[0];if(n)try{new Notification('New Order of Payment',{body:(n.payor||'A student')+' · '+(n.document||'')})}catch(e){}}
+function paintAll(){paintInbox();paintBell();paintArchive();if(!feesDirty)paintFees();paintHistory(false);
+ $('bdNew').textContent=D.new_all;$('bdArc').textContent=D.orders.filter(o=>o.status!=='New').length}
 function orow(o,btn){const st=STN[o.status];return '<div class="orow '+(o.status==='New'?'isnew':'')+'" data-open="'+o.id+'"><span class="ic '+(o.status==='Paid'?'c3':o.status==='Issued'?'c1':'c2')+'"><i class="fas '+(o.status==='Paid'?'fa-circle-check':'fa-receipt')+'"></i></span>'
- +'<div class="mid"><b>'+esc(o.payor||'(no name)')+'</b><small>'+esc(o.document||'Walk-in')+' · Serial No. '+esc(o.serial)+' · '+esc((o.created_at||'').slice(0,16))+'</small></div>'
+ +'<div class="mid"><b>'+esc(o.payor||'(no name)')+'</b><small>'+esc(o.document||'Walk-in')+' · Serial No. '+esc(o.serial)+' · '+esc((o.created_at||'').slice(0,16))+(o.status==='New'&&o.printed_at?' · printed, waiting to be moved':'')+'</small></div>'
  +'<span class="sts '+st[1]+'">'+st[0]+'</span><span class="amt">₱ '+money(o.amount)+'</span>'+(btn||'')+'</div>'}
 function paintInbox(){const l=D.orders.filter(o=>o.status==='New');
  $('inboxCnt').textContent=l.length+' waiting';
  $('inboxList').innerHTML=l.length?l.map(o=>orow(o,'<button type="button" class="btn btn-sm">Check &amp; print</button>')).join(''):'<div class="empty"><i class="fas fa-circle-check" style="font-size:2rem;color:#4caf50"></i><p style="margin-top:.8rem">No new orders. New requests from students appear here by themselves.</p></div>'}
-function paintBell(){const l=D.orders.filter(o=>o.status==='New'),c=$('ncnt');
+/* the bell only counts orders that are NOT printed yet */
+function paintBell(){const l=unprinted(),c=$('ncnt');
  if(l.length){c.textContent=l.length;c.classList.remove('hid')}else c.classList.add('hid');
  $('nlist').innerHTML=l.length?l.map(o=>'<div class="ni" data-open="'+o.id+'"><span class="nic c2"><i class="fas fa-receipt"></i></span><div><b>'+esc(o.payor||'New order')+'</b><small>'+esc(o.document||'')+' · ₱ '+money(o.amount)+'</small></div><span class="nw">'+esc((o.created_at||'').slice(11,16))+'</span></div>').join('')
-  :'<div class="nempty"><i class="fas fa-bell-slash"></i><br>No new orders</div>'}
+  :'<div class="nempty"><i class="fas fa-bell-slash"></i><br>No new orders to print</div>'}
 $('bell').addEventListener('click',e=>{e.stopPropagation();$('npanel').classList.toggle('open')});
 document.addEventListener('click',e=>{if(!e.target.closest('.bellw'))$('npanel').classList.remove('open')});
 $('ndev').addEventListener('click',e=>{e.stopPropagation();if(!('Notification' in window)){alert('This browser cannot show device alerts.');return}
  if(Notification.permission==='denied'){alert('Alerts are blocked. Open your device or browser Settings > Notifications > this site and allow them.');return}
  Notification.requestPermission().then(p=>toast(p==='granted'?'Device alerts are ON':'Device alerts are off'))});
-document.addEventListener('click',e=>{const o=e.target.closest('[data-open]');if(o){$('npanel').classList.remove('open');if(!e.target.closest('.arcrow-x'))openOrderOrArchive(o)}});
-function openOrderOrArchive(el){const o=byId(el.dataset.open);if(!o)return;if(el.closest('#arcList'))openArc(o);else openOrder(o.id)}
+document.addEventListener('click',e=>{const o=e.target.closest('[data-open]');if(o){$('npanel').classList.remove('open');openOrderOrArchive(o)}});
+function openOrderOrArchive(el){const o=byId(el.dataset.open);if(!o)return;
+ if(el.closest('#arcList')||(el.closest('#hvTable')&&o.status!=='New'))openArc(o);else openOrder(o.id)}
 
 /* ---- archive ---- */
 function paintArchive(){const q=$('arcQ').value.trim().toLowerCase(),s=$('arcSt').value;
@@ -2812,7 +2971,7 @@ function paintArchive(){const q=$('arcQ').value.trim().toLowerCase(),s=$('arcSt'
  const l=all.filter(o=>(!s||o.status===s)&&(!q||((o.payor||'')+' '+(o.document||'')+' '+(o.purpose||'')+' '+(o.serial||'')).toLowerCase().includes(q)));
  $('arcCnt').textContent=l.length+' of '+all.length+' shown';
  $('arcList').innerHTML=l.length?l.map(o=>orow(o)).join(''):'<div class="empty">'+(all.length?'No order matches your search.':'Printed orders will be listed here.')+'</div>';
- const y=D.sync||{};$('syncInfo').innerHTML='<i class="fas fa-cloud-arrow-up"></i> Every order is copied automatically to <b>'+esc(y.dir||'')+'</b>'+(y.webhook?' and sent to your web link':'')+'. '+(y.last_ok?'Last copy: '+esc(y.last_ok)+'. ':'')+(y.last_error?'<span style="color:#c62828">Problem: '+esc(y.last_error)+'</span>':'')+' You can also use <b>Download CSV / JSON</b> in the menu.'}
+ const y=D.sync||{};$('syncInfo').innerHTML='<i class="fas fa-cloud-arrow-up"></i> Every order is copied automatically to <b>'+esc(y.dir||'')+'</b>'+(y.webhook?' and sent to your web link':'')+'. '+(y.last_ok?'Last copy: '+esc(y.last_ok)+'. ':'')+(y.last_error?'<span style="color:#c62828">Problem: '+esc(y.last_error)+'</span>':'')+' Use <b>Transaction History</b> to check and download the records.'}
 $('arcQ').addEventListener('input',paintArchive);$('arcSt').addEventListener('change',paintArchive);
 function openArc(o){AM=o.id;$('arcT').textContent='Order of Payment · '+(o.payor||'')+' · '+(o.document||'')+' · Serial No. '+o.serial;
  $('arcSheet').style.gridTemplateColumns='repeat(3,minmax(0,1fr))';$('arcSheet').innerHTML=COPIES.map(l=>copyHTML(l,o)).join('');
@@ -2825,6 +2984,36 @@ $('arcPaid').addEventListener('click',async()=>{const o=byId(AM);if(!o)return;co
  if(!confirm(paid?'Confirm that the payment of '+(o.payor||'the student')+' was received? The student will be notified.':'Undo the payment confirmation?'))return;
  await api('/orderpay/paid',{id:o.id,paid});$('arcM').classList.remove('open');toast(paid?'Payment confirmed. The student was notified.':'Payment confirmation undone');load()});
 $('arcDel').addEventListener('click',async()=>{if(!confirm('Delete this Order of Payment permanently?'))return;await api('/orderpay/delete',{id:AM});$('arcM').classList.remove('open');toast('Deleted');load()});
+
+/* ---- transaction history: records, CSV / JSON preview and PDF download ---- */
+function histRows(){const q=$('hQ').value.trim().toLowerCase(),s=$('hSt').value,f=$('hFrom').value,t=$('hTo').value;
+ return D.orders.filter(o=>(!s||o.status===s)&&(!f||(o.date||'')>=f)&&(!t||(o.date||'')<=t)&&(!q||((o.payor||'')+' '+(o.document||'')+' '+(o.purpose||'')+' '+(o.serial||'')).toLowerCase().includes(q)))
+  .sort((a,b)=>((b.date||'')+(b.created_at||'')).localeCompare((a.date||'')+(a.created_at||'')))}
+function hq(){const p=new URLSearchParams();[['q','hQ'],['status','hSt'],['start','hFrom'],['end','hTo']].forEach(a=>{const v=$(a[1]).value.trim();if(v)p.set(a[0],v)});return p.toString()}
+function paintHistory(reload){if(!$('history').classList.contains('active')&&!reload)return;
+ const r=histRows(),all=r.reduce((s,o)=>s+(parseFloat(o.amount)||0),0),paid=r.filter(o=>o.status==='Paid').reduce((s,o)=>s+(parseFloat(o.amount)||0),0),aw=r.filter(o=>o.status==='Issued').reduce((s,o)=>s+(parseFloat(o.amount)||0),0);
+ $('hCnt').textContent=r.length+' of '+D.orders.length+' record(s)';
+ $('hTiles').innerHTML='<div class="tile t1"><div><small>Transactions</small><b>'+r.length+'</b></div><i class="fas fa-receipt"></i></div>'
+  +'<div class="tile t2"><div><small>Total (₱)</small><b>'+money(all)+'</b></div><i class="fas fa-coins"></i></div>'
+  +'<div class="tile t3"><div><small>Awaiting payment (₱)</small><b>'+money(aw)+'</b></div><i class="fas fa-hourglass-half"></i></div>'
+  +'<div class="tile t4"><div><small>Paid (₱)</small><b>'+money(paid)+'</b></div><i class="fas fa-circle-check"></i></div>';
+ $('hBody').innerHTML=r.length?r.map(o=>{const st=STN[o.status];return '<tr class="dr" data-open="'+o.id+'" style="cursor:pointer"><td data-label="Serial No.">'+esc(o.serial)+'</td><td data-label="Date">'+esc(o.date)+'</td><td data-label="Name of Payor" class="wrap">'+esc(o.payor||'(no name)')+'</td><td data-label="Document" class="wrap">'+esc(o.document||'Walk-in')+'</td><td data-label="Amount">₱ '+money(o.amount)+'</td><td data-label="Status"><span class="sts '+st[1]+'">'+st[0]+'</span></td><td data-label="Printed">'+esc((o.printed_at||'—').slice(0,16))+'</td><td data-label="Paid">'+esc((o.paid_at||'—').slice(0,16))+'</td></tr>'}).join('')
+  :'<tr><td colspan="8"><div class="empty">No transactions match the filters.</div></td></tr>';
+ const sig=hq()+'|'+D.orders.map(o=>o.id+o.updated_at).join();
+ if(HV!=='table'&&(reload||sig!==HSIG))loadPrev();HSIG=sig}
+function loadPrev(){clearTimeout(HT);HT=setTimeout(()=>{const k=HV;
+ fetch('/orderpay/export.'+k+'?'+hq()+'&inline=1',{cache:'no-store'}).then(r=>r.text()).then(t=>{$(k==='csv'?'hvCsv':'hvJson').textContent=t.trim()?t:'(no transactions match the filters)'}).catch(()=>{})},150)}
+document.querySelectorAll('[data-hv]').forEach(b=>b.addEventListener('click',()=>{HV=b.dataset.hv;
+ document.querySelectorAll('[data-hv]').forEach(x=>x.classList.toggle('active',x===b));
+ $('hvTable').classList.toggle('hid',HV!=='table');$('hvCsv').classList.toggle('hid',HV!=='csv');$('hvJson').classList.toggle('hid',HV!=='json');
+ if(HV!=='table')loadPrev()}));
+['hQ','hSt','hFrom','hTo'].forEach(id=>$(id).addEventListener('input',()=>paintHistory(true)));
+$('hCsvDl').addEventListener('click',()=>{location.href='/orderpay/export.csv?'+hq()});
+$('hJsonDl').addEventListener('click',()=>{location.href='/orderpay/export.json?'+hq()});
+$('hPdf').addEventListener('click',async()=>{try{const r=await fetch('/orderpay/history.pdf?'+hq());
+ if(!r.ok){alert(await r.text());return}
+ const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='order-of-payment-history.pdf';
+ document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);toast('PDF downloaded')}catch(e){toast('Could not create the PDF')}});
 
 /* ---- the sheet (same layout as the printed form) ---- */
 const COPIES=["STUDENT'S/ CLIENT'S COPY","CASHIER'S COPY","COA's COPY"];
@@ -2842,7 +3031,7 @@ function copyHTML(label,o){const b=(o.bank||[]).concat([{},{},{}]).slice(0,3),to
  +'<p class="dep">Please deposit the collections under Bank Account/s:</p>'
  +'<table class="bk"><tr><th>No.</th><th>Name of Bank</th><th>Amount</th></tr>'+rows+'</table>'
  +'<div class="tot"><b>Total</b><span class="tv">'+(tot>0?'₱ '+money(tot):'')+'</span></div>'
- +'<div class="sg"><div class="sl"></div><b>'+esc(o.signer)+'</b><span>Signature over Printed Name Head of Accounting</span><span>Division/Unit/Authorized Official</span></div></div>'}
+ +'<div class="sg"><b>'+esc(o.signer)+'</b><span>Signature over Printed Name Head of Accounting</span><span>Division/Unit/Authorized Official</span></div></div>'}
 
 /* ---- editor ---- */
 const PAPERS={a4:[210,297],letter:[215.9,279.4],legal:[215.9,355.6],folio:[215.9,330.2],a5:[148,210],a3:[297,420]};
@@ -2871,7 +3060,10 @@ async function saveNow(){if(!CUR)return;clearTimeout(saveT);readForm();
  try{const r=await api('/orderpay/save',CUR);const i=D.orders.findIndex(o=>o.id===r.order.id);if(i>=0)D.orders[i]=r.order;CUR.updated_at=r.order.updated_at;$('saveSt').textContent='Saved ✓';paintAll()}
  catch(e){$('saveSt').textContent='Not saved - check the connection'}}
 $('btnSave').addEventListener('click',async()=>{await saveNow();toast('Saved')});
-async function printNow(){if(!CUR)return;await saveNow();renderSheet();setTimeout(()=>window.print(),150)}
+/* printing marks the order as printed, so its bell indicator disappears at once */
+async function printNow(){if(!CUR)return;await saveNow();
+ try{const r=await api('/orderpay/printed',{id:CUR.id});const i=D.orders.findIndex(o=>o.id===r.order.id);if(i>=0)D.orders[i]=r.order;paintAll()}catch(e){}
+ renderSheet();setTimeout(()=>window.print(),150)}
 $('btnPrint').addEventListener('click',printNow);
 window.addEventListener('afterprint',()=>{if(CUR&&CUR.status==='New'&&$('sheet').classList.contains('active'))$('afterBar').classList.add('open')});
 $('abNo').addEventListener('click',()=>$('afterBar').classList.remove('open'));
@@ -2948,10 +3140,12 @@ body{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#eef2ef;color:#
  <button type="button" onclick="window.print()"><i class="fas fa-print"></i> Print all pages</button>
  <form method="POST" action="/admin/authorize" onsubmit="return confirm('Mark this document as authorized? The student will be notified.')"><input type="hidden" name="id" value="{{ a.id }}"><button class="ok"><i class="fas fa-stamp"></i> Mark as authorized</button></form>
  <span>{% if a.authorized_at %}&#10003; Authorized {{ a.authorized_at }}{% else %}Print it, sign/authorize it, then press “Mark as authorized”.{% endif %}</span></div>
-<div class="info"><b>Student:</b> {{ a.fullname }} ({{ a.studentid }}) &nbsp;·&nbsp; <b>Document:</b> {{ a.document }} &nbsp;·&nbsp; <b>Requested:</b> {{ a.sched_label }} &nbsp;·&nbsp; <b>Pages:</b> {{ a.scans|length }}</div>
+<div class="info"><b>Student:</b> {{ a.fullname }} ({{ a.studentid }}) &nbsp;·&nbsp; <b>Document:</b> {{ a.document }}{% if a.spec_label %} ({{ a.spec_label }}){% endif %} &nbsp;·&nbsp; <b>Requested:</b> {{ a.sched_label }} &nbsp;·&nbsp; <b>Pages:</b> {{ a.scans|length }}</div>
 {% for n in range(a.scans|length) %}<div class="pg"><img src="/scanfile/{{ a.id }}/{{ n }}" alt="Page {{ n + 1 }}"><p>Page {{ n + 1 }} of {{ a.scans|length }}</p></div>{% endfor %}
 <div class="auth">Authorized by: ______________________________ &nbsp;&nbsp; Position: ____________________ &nbsp;&nbsp; Date: ______________</div>
 </body></html>"""
+
+
 # ========== SURVEY SUMMARY (percentages for the admin) ==========
 def _pct(n, t):
     return round(100.0 * n / t, 1) if t else 0
@@ -2981,15 +3175,15 @@ def csm_summary():
     sqd, tot_app, tot_sat, tot_sum = [], 0, 0, 0
     for i, text in enumerate(CSM_SQD):
         vals = [(r.get('sqd') or [])[i] for r in rows if len(r.get('sqd') or []) > i]
-        app = [int(v) for v in vals if v != 'NA']
-        na = len(vals) - len(app)
-        cells = [dict(label=names[k - 1], n=app.count(k), pct=_pct(app.count(k), len(app))) for k in range(1, 6)]
+        app_ = [int(v) for v in vals if v != 'NA']
+        na = len(vals) - len(app_)
+        cells = [dict(label=names[k - 1], n=app_.count(k), pct=_pct(app_.count(k), len(app_))) for k in range(1, 6)]
         cells.append(dict(label='N/A', n=na, pct=_pct(na, n)))
-        sat = sum(1 for v in app if v >= 4)
-        tot_app += len(app)
+        sat = sum(1 for v in app_ if v >= 4)
+        tot_app += len(app_)
         tot_sat += sat
-        tot_sum += sum(app)
-        sqd.append(dict(i=i, text=text, cells=cells, sat=_pct(sat, len(app))))
+        tot_sum += sum(app_)
+        sqd.append(dict(i=i, text=text, cells=cells, sat=_pct(sat, len(app_))))
     return dict(
         n=n,
         client=dist('client_type', [(c, c) for c in CSM_CLIENT]),
@@ -2997,7 +3191,7 @@ def csm_summary():
         ages=ages, services=services,
         cc1=dist('cc1', [('1', "1. Knows what a CC is and saw this office's CC"),
                          ('2', "2. Knows what a CC is but did NOT see this office's CC"),
-                         ('3', '3. Learned of the CC only when seeing this office\'s CC'),
+                         ('3', "3. Learned of the CC only when seeing this office's CC"),
                          ('4', '4. Does not know what a CC is and did not see one')]),
         cc2=dist('cc2', [('1', 'Easy to see'), ('2', 'Somewhat easy to see'), ('3', 'Difficult to see'),
                          ('4', 'Not visible at all'), ('5', 'N/A')]),
@@ -3011,10 +3205,7 @@ _ONES = ['', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NI
          'THIRTEEN', 'FOURTEEN', 'FIFTEEN', 'SIXTEEN', 'SEVENTEEN', 'EIGHTEEN', 'NINETEEN']
 _TENS = ['', '', 'TWENTY', 'THIRTY', 'FORTY', 'FIFTY', 'SIXTY', 'SEVENTY', 'EIGHTY', 'NINETY']
 _SCALE = ['', ' THOUSAND', ' MILLION', ' BILLION']
-
-
-def now_s():
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+STATUS_LABEL = {'New': 'New', 'Issued': 'Awaiting payment', 'Paid': 'Paid'}
 
 
 def _w3(n):
@@ -3107,7 +3298,7 @@ def create_order_for(appt, me):
 
 def issue_order(o):
     if o['status'] == 'New':
-        o.update(status='Issued', printed_at=now_s(), updated_at=now_s())
+        o.update(status='Issued', printed_at=o.get('printed_at') or now_s(), updated_at=now_s())
         a = find_appt(o.get('appt_id'))
         if a and a.get('stage') in (ST_PREP, None, ''):
             a.update(stage=ST_UNPAID, order_at=now_s())
@@ -3153,17 +3344,104 @@ def apply_order_fields(o, d):
     o['updated_at'] = now_s()
 
 
-def orders_csv():
+def filter_orders(args):
+    """Orders matching the history filters (q, status, start, end), newest first."""
+    q = (args.get('q') or '').strip().lower()
+    st, s, e = args.get('status') or '', args.get('start') or '', args.get('end') or ''
+    out = []
+    for o in sorted(orders_db.values(), key=lambda x: (x.get('date', ''), x.get('created_at', '')), reverse=True):
+        if st and o.get('status') != st:
+            continue
+        if s and (o.get('date') or '') < s:
+            continue
+        if e and (o.get('date') or '') > e:
+            continue
+        hay = ' '.join(str(o.get(k, '')) for k in ('payor', 'document', 'purpose', 'serial')).lower()
+        if q and q not in hay:
+            continue
+        out.append(o)
+    return out
+
+
+def orders_csv(rows=None):
+    rows = list(orders_db.values()) if rows is None else rows
     out = io.StringIO()
     w = csv.writer(out)
     w.writerow(['Serial No.', 'Date', 'Status', 'Name of Payor', 'Address', 'Document', 'For payment of', 'Amount',
                 'Amount in words', 'Bank', 'Account No.', 'Created', 'Printed', 'Paid'])
-    for o in sorted(orders_db.values(), key=lambda x: x.get('created_at', '')):
+    for o in sorted(rows, key=lambda x: x.get('created_at', '')):
         b = (o.get('bank') or [{}])[0]
-        w.writerow([o.get('serial'), o.get('date'), o.get('status'), o.get('payor'), o.get('addr'), o.get('document'),
-                    o.get('purpose'), f"{o.get('amount', 0):.2f}", o.get('words') or amount_words(o.get('amount')),
-                    b.get('bank', ''), b.get('no', ''), o.get('created_at'), o.get('printed_at'), o.get('paid_at')])
+        w.writerow([o.get('serial'), o.get('date'), STATUS_LABEL.get(o.get('status'), o.get('status')), o.get('payor'),
+                    o.get('addr'), o.get('document'), o.get('purpose'), f"{o.get('amount', 0):.2f}",
+                    o.get('words') or amount_words(o.get('amount')), b.get('bank', ''), b.get('no', ''),
+                    o.get('created_at'), o.get('printed_at'), o.get('paid_at')])
     return out.getvalue()
+
+
+def history_pdf(rows, args):
+    """Transaction history as a PDF (needs: pip install reportlab). Raises ImportError when it is missing."""
+    from xml.sax.saxutils import escape as xesc
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=12 * mm, rightMargin=12 * mm,
+                            topMargin=14 * mm, bottomMargin=16 * mm, title="Order of Payment - Transaction History",
+                            author="SLSU JGE Tagkawayan Registrar")
+    base = getSampleStyleSheet()
+    cell = ParagraphStyle('cell', parent=base['Normal'], fontSize=8, leading=10)
+    head = ParagraphStyle('head', parent=cell, textColor=colors.white, fontName='Helvetica-Bold')
+    title = ParagraphStyle('title', parent=base['Title'], fontSize=15, textColor=colors.HexColor('#003d1f'), spaceAfter=2)
+    sub = ParagraphStyle('sub', parent=base['Normal'], fontSize=9, textColor=colors.HexColor('#555555'), alignment=1)
+    P = lambda v, st=cell: Paragraph(xesc(str(v if v is not None else '')), st)
+    money = lambda n: f"PHP {float(n or 0):,.2f}"
+
+    filt = []
+    if args.get('status'):
+        filt.append("Status: " + STATUS_LABEL.get(args['status'], args['status']))
+    if args.get('start') or args.get('end'):
+        filt.append(f"Date: {args.get('start') or '...'} to {args.get('end') or '...'}")
+    if args.get('q'):
+        filt.append(f"Search: {args['q']}")
+    story = [Paragraph("SLSU JGE TAGKAWAYAN - OFFICE OF THE REGISTRAR", sub),
+             Paragraph("Order of Payment - Transaction History", title),
+             Paragraph(f"Generated {datetime.now().strftime('%B %d, %Y %I:%M %p')} · " +
+                       xesc('; '.join(filt) if filt else 'All transactions'), sub), Spacer(1, 6 * mm)]
+    data = [[P(h, head) for h in ('No.', 'Serial No.', 'Date', 'Name of Payor', 'Document / Purpose', 'Amount',
+                                  'Status', 'Paid on')]]
+    for i, o in enumerate(rows, 1):
+        data.append([P(i), P(o.get('serial')), P(o.get('date')), P(o.get('payor') or '(no name)'),
+                     P((o.get('document') or 'Walk-in') + ' - ' + (o.get('purpose') or '')),
+                     P(money(o.get('amount'))), P(STATUS_LABEL.get(o.get('status'), o.get('status'))),
+                     P((o.get('paid_at') or '-')[:16])])
+    if len(data) == 1:
+        data.append([P('')] * 3 + [P('No transactions match the filters.')] + [P('')] * 4)
+    t = Table(data, colWidths=[10 * mm, 26 * mm, 22 * mm, 58 * mm, 72 * mm, 28 * mm, 28 * mm, 29 * mm], repeatRows=1)
+    t.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#003d1f')),
+                           ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f1f6f3')]),
+                           ('GRID', (0, 0), (-1, -1), .4, colors.HexColor('#c9d3cd')),
+                           ('VALIGN', (0, 0), (-1, -1), 'TOP'), ('TOPPADDING', (0, 0), (-1, -1), 3),
+                           ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+    story.append(t)
+    total = sum(float(o.get('amount') or 0) for o in rows)
+    paid = sum(float(o.get('amount') or 0) for o in rows if o.get('status') == 'Paid')
+    wait = sum(float(o.get('amount') or 0) for o in rows if o.get('status') == 'Issued')
+    story += [Spacer(1, 6 * mm),
+              Paragraph(f"<b>Transactions:</b> {len(rows)} &nbsp;&nbsp; <b>Total:</b> {money(total)} &nbsp;&nbsp; "
+                        f"<b>Paid:</b> {money(paid)} &nbsp;&nbsp; <b>Awaiting payment:</b> {money(wait)}", cell)]
+
+    def footer(canvas, d):
+        canvas.saveState()
+        canvas.setFont('Helvetica', 8)
+        canvas.setFillColor(colors.HexColor('#555555'))
+        canvas.drawString(12 * mm, 8 * mm, "SLSU JGE Tagkawayan - Order of Payment transaction history")
+        canvas.drawRightString(landscape(A4)[0] - 12 * mm, 8 * mm, f"Page {d.page}")
+        canvas.restoreState()
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return buf.getvalue()
 
 
 def export_order(o):
@@ -3210,7 +3488,7 @@ def protect_routes():
         return redirect('/')
     if request.path.startswith('/admin') and em != ADMIN_EMAIL:
         return redirect(home_for(em))
-    if request.path.startswith('/orderpay') and em not in (ADMIN_EMAIL, OP_EMAIL):
+    if request.path.startswith('/orderpay') and em != OP_EMAIL:      # only the Order of Payment account
         return redirect(home_for(em))
     if em == OP_EMAIL and not request.path.startswith('/orderpay') and ep not in ('logout',):
         return redirect('/orderpay')
@@ -3223,10 +3501,7 @@ def too_large(e):
 
 
 def notify_registration_result():
-    """If this browser registered earlier and was rejected, tell the student once.
-    (An approved account is NOT flashed here: the login page shows a persistent
-    'Your account has been activated' reminder until the student logs in. A pending account
-    shows a persistent 'try again later' reminder.)"""
+    """If this browser registered earlier and was rejected, tell the student once."""
     pe = session.get('pending_email')
     if pe in rejected_accounts:
         session.pop('pending_email', None)
@@ -3274,7 +3549,7 @@ def login():
     e = find_user(key)
     if e and check_password_hash(approved_users[e]['password'], pw):
         u = approved_users[e]
-        session.pop('pending_email', None)          # logged in: the "account activated" reminder goes away
+        session.pop('pending_email', None)
         session.update(email=e, fullname=u['fullname'], studentid=u['studentid'])
         return redirect('/dashboard')
 
@@ -3337,8 +3612,7 @@ def register():
                                         age=age, course=f['course'], year_level=f['year_level'],
                                         level='lhs' if lhs else 'college',
                                         section=f['section'].title()[:30] if lhs else '',
-                                        registered_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                        password=generate_password_hash(pw))
+                                        registered_at=now_s(), password=generate_password_hash(pw))
     rejected_accounts.discard(f['email'])
     session['pending_email'] = f['email']
     return render(LOGIN_TPL, page='pending')
@@ -3355,13 +3629,11 @@ def dashboard():
     mine = appointments_db.get(session['email'], [])
     session['fullname'], session['studentid'] = me['fullname'], me['studentid']
     active_appts = sorted([a for a in mine if a['status'] == 'Pending'], key=slot_key)
-    history = sorted([a for a in mine if a['status'] == 'Completed'],
-                     key=lambda a: a['completed_raw'], reverse=True)
+    history = sorted([a for a in mine if a['status'] == 'Completed'], key=lambda a: a['completed_raw'], reverse=True)
     missed = sorted([a for a in mine if a['status'] == 'Missed'], key=lambda a: a['sched_date'], reverse=True)
     return render(USER_TPL, active_appts=active_appts, history=history, missed=missed, me=me,
                   avatar=me.get('avatar'), nm=name_parts(me), greet=greeting_name(me),
-                  is_lhs=me.get('level') == 'lhs', strikes=0, notifs=build_notifs(session['email'], me), drawer_sub=drawer_sub(me),
-                  restricted_until=fmt_date(me['restricted_until']) if is_restricted(me) else '')
+                  is_lhs=me.get('level') == 'lhs', notifs=build_notifs(session['email'], me))
 
 
 @app.route('/profile', methods=['POST'])
@@ -3510,7 +3782,8 @@ def book():
         return redirect(back)
     fullname = compose_name(ln, fn, mn)
     doc = g('document')
-    if me.get('level') == 'lhs':
+    lhs = me.get('level') == 'lhs'
+    if lhs:
         course, year, section = LHS, g('year_level'), g('section').title()[:30]
         year_ok = year in GRADES and bool(section)
     else:
@@ -3526,6 +3799,18 @@ def book():
     if not contact:
         flash("Enter a valid PH mobile number (09XXXXXXXXX).", 'error')
         return redirect(back)
+
+    spec, label = {}, ''
+    if doc in SEM_DOCS:                       # semester, school year, year level and course of the records
+        sem, sy, ycov = g('semester'), g('school_year'), g('year_cov')
+        ccov = '' if lhs else g('course_cov')
+        if (sem not in SEMESTERS or not valid_school_year(sy) or ycov not in (GRADES if lhs else YEARS_COVERED)
+                or (not lhs and ccov not in COURSES)):
+            flash("Please choose the semester, school year, year level" + ("" if lhs else " and course") +
+                  " of the records you need.", 'error')
+            return redirect(back)
+        spec = dict(semester=sem, school_year=sy, year_level=ycov, course=ccov)
+        label = spec_text(sem, sy, ycov, ccov)
 
     aid = uuid.uuid4().hex[:10]
     names = []
@@ -3554,6 +3839,7 @@ def book():
         'email': session['email'], 'level': me.get('level', 'college'),
         'fullname': fullname, 'studentid': session['studentid'],
         'year_level': year, 'section': section, 'course': course, 'document': doc,
+        'spec': spec, 'spec_label': label,
         'comment': g('comment')[:500], 'payment': g('payment'), 'req_confirmed': True,
         'sched_date': today.isoformat(), 'sched_label': today.strftime('%a, %b %d, %Y'), 'sched_time': 'Online request',
         'contact': contact, 'scans': names, 'authorized_at': '', 'stage': ST_PREP, 'claim_date': '', 'claim_label': '',
@@ -3564,17 +3850,10 @@ def book():
     return redirect('/dashboard#my-appointments')     # PRG: no duplicate on refresh
 
 
-def _when(ts):
-    try:
-        return datetime.strptime(ts, '%Y-%m-%d %H:%M:%S').strftime('%b %d, %I:%M %p')
-    except ValueError:
-        return ''
-
-
-# ---------- Order of Payment: page + real-time data (staff / admin only) ----------
+# ---------- Order of Payment: page + real-time data (Order of Payment account only) ----------
 @app.route('/orderpay')
 def orderpay():
-    return render(ORDERPAY_TPL, defs=OP_DEFAULTS, is_admin=session['email'] == ADMIN_EMAIL)
+    return render(ORDERPAY_TPL, defs=OP_DEFAULTS)
 
 
 def _json():
@@ -3584,8 +3863,10 @@ def _json():
 @app.route('/orderpay/data')
 def orderpay_data():
     orders = sorted(orders_db.values(), key=lambda o: o.get('created_at', ''), reverse=True)
+    new = [o for o in orders if o['status'] == 'New']
     return jsonify(orders=orders, fees={d: fee_for(d) for d in DOCS}, docs=DOCS,
-                   new=sum(1 for o in orders if o['status'] == 'New'),
+                   new=sum(1 for o in new if not o.get('printed_at')),      # bell: not printed yet
+                   new_all=len(new),
                    sync=dict(dir=EXPORT_DIR, webhook=bool(EXPORT_WEBHOOK_URL), **EXPORT_STATE))
 
 
@@ -3603,6 +3884,18 @@ def orderpay_save():
 @app.route('/orderpay/new', methods=['POST'])
 def orderpay_new():
     return jsonify(order=make_order(manual=True))
+
+
+@app.route('/orderpay/printed', methods=['POST'])
+def orderpay_printed():
+    """Print was pressed: the order no longer counts on the bell."""
+    o = orders_db.get(_json().get('id'))
+    if not o:
+        return jsonify(error='not found'), 404
+    if o['status'] == 'New' and not o.get('printed_at'):
+        o.update(printed_at=now_s(), updated_at=now_s())
+        export_order(o)
+    return jsonify(order=o)
 
 
 @app.route('/orderpay/issue', methods=['POST'])
@@ -3654,33 +3947,48 @@ def orderpay_fees():
     return jsonify(ok=True, changed=len(changed))
 
 
+def _download(body, mimetype, filename):
+    """inline=1 shows the file in the page preview; otherwise the browser downloads it."""
+    disp = 'inline' if request.args.get('inline') else f'attachment; filename={filename}'
+    mt = 'text/plain; charset=utf-8' if request.args.get('inline') else mimetype
+    return app.response_class(body, mimetype=mt, headers={'Content-Disposition': disp})
+
+
 @app.route('/orderpay/export.csv')
 def orderpay_export_csv():
-    return app.response_class(orders_csv(), mimetype='text/csv; charset=utf-8',
-                              headers={'Content-Disposition': 'attachment; filename=orders-of-payment.csv'})
+    rows = filter_orders(request.args)
+    return _download(orders_csv(rows) if rows else '', 'text/csv; charset=utf-8', 'orders-of-payment.csv')
 
 
 @app.route('/orderpay/export.json')
 def orderpay_export_json():
-    return app.response_class(json.dumps(list(orders_db.values()), ensure_ascii=False, indent=2),
-                              mimetype='application/json',
-                              headers={'Content-Disposition': 'attachment; filename=orders-of-payment.json'})
+    rows = filter_orders(request.args)
+    return _download(json.dumps(rows, ensure_ascii=False, indent=2) if rows else '', 'application/json',
+                     'orders-of-payment.json')
 
 
+@app.route('/orderpay/history.pdf')
+def orderpay_history_pdf():
+    rows = filter_orders(request.args)
+    try:
+        data = history_pdf(rows, request.args)
+    except ImportError:
+        return app.response_class("The PDF tool is not installed. Run:  pip install reportlab  then restart the server.",
+                                  status=501, mimetype='text/plain')
+    return app.response_class(data, mimetype='application/pdf', headers={
+        'Content-Disposition': f"attachment; filename=order-of-payment-history-{date.today():%Y%m%d}.pdf"})
+
+
+# ---------- Admin ----------
 @app.route('/admin')
 def admin_dashboard():
     st = lambda a: approved_users.get(a.get('email'), {})
-    appts = [dict(a, avatar=st(a).get('avatar', ''), strikes=st(a).get('strikes', 0), restricted=is_restricted(st(a)))
-             for lst in appointments_db.values() for a in lst]
+    appts = [dict(a, avatar=st(a).get('avatar', '')) for lst in appointments_db.values() for a in lst]
     active = sorted([a for a in appts if a['status'] == 'Pending'], key=slot_key)
-    archive = sorted([a for a in appts if a['status'] == 'Completed'],
-                     key=lambda a: a['completed_raw'], reverse=True)
+    archive = sorted([a for a in appts if a['status'] == 'Completed'], key=lambda a: a['completed_raw'], reverse=True)
     missed = sorted([a for a in appts if a['status'] == 'Missed'], key=lambda a: a['sched_date'], reverse=True)
     recent = sorted(appts, key=lambda a: a['submitted_at'], reverse=True)[:50]
-    people = sorted((dict(u, email=e, strikes=u.get('strikes', 0), restricted=is_restricted(u))
-                     for e, u in approved_users.items()), key=lambda u: u['fullname'].lower())
-    restricted = [dict(name=u['fullname'], sid=u['studentid'], email=e, avatar=u.get('avatar', ''),
-                       until=fmt_date(u['restricted_until'])) for e, u in approved_users.items() if is_restricted(u)]
+    people = sorted((dict(u, email=e) for e, u in approved_users.items()), key=lambda u: u['fullname'].lower())
 
     profiles = {}
     for e, u in approved_users.items():
@@ -3690,9 +3998,8 @@ def admin_dashboard():
             level=u.get('level', 'college'), section=u.get('section', ''),
             gender=u.get('gender', ''), birthday=u.get('birthday', ''), age=u.get('age', ''),
             course=u.get('course', ''), year=u.get('year_level', ''), contact=u.get('contact', ''),
-            address=u.get('address', ''), avatar=u.get('avatar', ''), strikes=u.get('strikes', 0),
-            restricted_until=fmt_date(u['restricted_until']) if is_restricted(u) else '',
-            appts=[dict(document=a['document'], date=a['sched_label'], time=a['sched_time'], status=a['status'])
+            address=u.get('address', ''), avatar=u.get('avatar', ''),
+            appts=[dict(document=a['document'], spec=a.get('spec_label', ''), date=a['sched_label'], status=a['status'])
                    for a in sorted(appointments_db.get(e, []), key=lambda a: a['submitted_at'], reverse=True)])
 
     year = str(date.today().year)
@@ -3706,10 +4013,9 @@ def admin_dashboard():
 
     ev = []
     for u in pending_accounts.values():
-        ev.append((u.get('registered_at', ''), 'fa-user-plus', 'c2', 'New registration',
-                   f"{u['fullname']} · awaiting approval"))
+        ev.append((u.get('registered_at', ''), 'fa-user-plus', 'c2', 'New registration', f"{u['fullname']} · awaiting approval"))
     for a in appts:
-        ev.append((a['submitted_at'], 'fa-calendar-plus', 'c1', 'New appointment', f"{a['fullname']} · {a['document']}"))
+        ev.append((a['submitted_at'], 'fa-calendar-plus', 'c1', 'New request', f"{a['fullname']} · {a['document']}"))
         if a['status'] == 'Completed':
             ev.append((a['completed_raw'], 'fa-circle-check', 'c3', 'Request completed', f"{a['fullname']} · {a['document']}"))
         if a['status'] == 'Missed':
@@ -3724,7 +4030,7 @@ def admin_dashboard():
     return render(ADMIN_TPL, pending=pending_accounts, total_pending=len(pending_accounts),
                   total_approved=len(approved_users), all_count=len(active), archive_count=len(archive),
                   missed_count=len(missed), active_groups=group_cy(active), archive_groups=group_cy(archive),
-                  missed_groups=group_cy(missed), approved_groups=group_cy(people), restricted=restricted,
+                  missed_groups=group_cy(missed), approved_groups=group_cy(people),
                   recent=recent, profiles=profiles, chart=chart, donut=donut, activity=activity,
                   csm=csm_summary(), sugg=sugg)
 
@@ -3746,7 +4052,7 @@ def complete():
                  completed_at=now.strftime('%b %d, %Y · %I:%M %p'))
         flash(f"Marked as done and archived: {a['document']} — {a['fullname']}", 'ok')
     else:
-        flash("Appointment not found.", 'error')
+        flash("Request not found.", 'error')
     return redirect('/admin#all-appointments')
 
 
@@ -3754,10 +4060,10 @@ def complete():
 def reopen():
     a = find_appt(request.form.get('id', ''))
     if a and a['status'] == 'Completed':
-        a.update(status='Pending', stage=ST_PROC, completed_raw='', completed_at='', exempt=True)   # exempt: never auto-missed
-        flash("Moved back to active appointments.", 'ok')
+        a.update(status='Pending', stage=ST_PROC, completed_raw='', completed_at='', exempt=True)
+        flash("Moved back to active requests.", 'ok')
     else:
-        flash("Appointment not found.", 'error')
+        flash("Request not found.", 'error')
     return redirect('/admin#archive')
 
 
@@ -3771,7 +4077,7 @@ def attended():
                  completed_at=now.strftime('%b %d, %Y · %I:%M %p'))
         flash(f"Corrected: {a['fullname']} attended. Moved to the archive.", 'ok')
     else:
-        flash("Appointment not found.", 'error')
+        flash("Request not found.", 'error')
     return redirect('/admin#missed')
 
 
@@ -3781,19 +4087,9 @@ def excuse():
     if a and a['status'] == 'Missed':
         refund_strike(a)
         a['status'] = 'Excused'
-        flash(f"Excused: {a['fullname']} · {a['document']}. It no longer counts as missed.", 'ok')
+        flash(f"Excused: {a['fullname']} · {a['document']}.", 'ok')
     else:
-        flash("Appointment not found.", 'error')
-    return redirect('/admin#missed')
-
-
-@app.route('/admin/restriction/lift', methods=['POST'])
-def lift_restriction():
-    u = approved_users.get(request.form.get('email', '').strip().lower())
-    if u:
-        u.pop('restricted_until', None)
-        u['strikes'] = 0
-        flash(f"Booking restriction lifted for {u['fullname']}.", 'ok')
+        flash("Request not found.", 'error')
     return redirect('/admin#missed')
 
 
@@ -3911,9 +4207,6 @@ def admin_update_student():
     if request.form.get('remove_avatar'):
         delete_avatar(u.get('avatar'))
         u.pop('avatar', None)
-    if request.form.get('clear_restriction'):
-        u.pop('restricted_until', None)
-        u['strikes'] = 0
     if email != orig:
         approved_users[email] = approved_users.pop(orig)
         if orig in appointments_db:
@@ -3928,20 +4221,20 @@ def admin_update_student():
 
 @app.route('/admin/approve', methods=['POST'])
 def approve():
-    """Approve a pending account. No email is sent: the student sees the result on the Log In page."""
+    """Approve a pending account. The student sees the result on the waiting page and gets a text message."""
     e = request.form.get('email', '').strip().lower()
     if e in pending_accounts:
         approved_users[e] = pending_accounts.pop(e)
-        approved_users[e]['approved_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        approved_users[e]['approved_at'] = now_s()
         send_sms(norm_phone(approved_users[e].get('contact')),
                  "SLSU JGE Registrar: your account was approved. You can now log in and request your documents.")
-        flash(f"✅ Approved {e}. The student will see the activation notice on the Log In page.", 'ok')
+        flash(f"✅ Approved {e}.", 'ok')
     return redirect('/admin#accounts')
 
 
 @app.route('/admin/reject', methods=['POST'])
 def reject():
-    """Reject a pending account. No email is sent."""
+    """Reject a pending account."""
     e = request.form.get('email', '').strip().lower()
     rej = pending_accounts.pop(e, None)
     if rej:
@@ -3952,22 +4245,26 @@ def reject():
     return redirect('/admin#accounts')
 
 
-# ---------- forgot password: find account -> e-mailed 6-digit code -> new password ----------
+# ---------- forgot password: find account -> 6-digit code (SMS and/or Gmail) -> new password ----------
+NO_SERVICE_MSG = ("The code could not be sent because the text-message and e-mail services are not set up yet. "
+                  "Please contact the Registrar's Office.")
+
+
 @app.route('/forgot', methods=['GET', 'POST'])
 def forgot():
     if request.method != 'POST':
         return render(LOGIN_TPL, page='forgot')
-    num = norm_phone(request.form.get('contact', ''))
-    e = find_user_by_phone(num) if num else None
+    key = request.form.get('contact', '').strip().lower()
+    num = norm_phone(key)
+    e = (find_user_by_phone(num) if num else None) or find_user(key)
     if not e:
-        flash("We couldn't find an approved account with that contact number. Use the number you gave when you registered.", 'error')
+        flash("We couldn't find an approved account with that contact number, Gmail or Student ID.", 'error')
         return render(LOGIN_TPL, page='forgot')
     session['reset_email'] = e
     session.pop('reset_ok', None)
     if time.time() - RESET_CODES.get(e, {}).get('sent', 0) > CODE_COOLDOWN:
         if not send_reset_code(e):
-            flash("The text-message (SMS) service is not set up yet, so the code could not be sent. "
-                  "Please contact the Registrar's Office.", 'error')
+            flash(NO_SERVICE_MSG, 'error')
     return redirect('/forgot/verify')
 
 
@@ -3976,9 +4273,9 @@ def forgot_verify():
     e = session.get('reset_email')
     if e not in approved_users:
         return redirect('/forgot')
-    masked = mask_phone(approved_users[e].get('contact'))
+    sent_to = ', '.join((RESET_CODES.get(e) or {}).get('via') or [])
     if request.method != 'POST':
-        return render(LOGIN_TPL, page='verify', masked=masked)
+        return render(LOGIN_TPL, page='verify', sent_to=sent_to)
     code = re.sub(r'\D', '', request.form.get('code', ''))
     rec = RESET_CODES.get(e)
     if not rec or time.time() > rec['exp']:
@@ -3993,7 +4290,7 @@ def forgot_verify():
         RESET_CODES.pop(e, None)
         session['reset_ok'] = e
         return redirect('/forgot/new')
-    return render(LOGIN_TPL, page='verify', masked=masked)
+    return render(LOGIN_TPL, page='verify', sent_to=sent_to)
 
 
 @app.route('/forgot/resend', methods=['POST'])
@@ -4005,10 +4302,9 @@ def forgot_resend():
     if wait > 0:
         flash(f"Please wait {wait} seconds before requesting another code.", 'error')
     elif send_reset_code(e):
-        flash("A new code was sent to your phone.", 'ok')
+        flash("A new code was sent.", 'ok')
     else:
-        flash("The text-message (SMS) service is not set up yet, so the code could not be sent. "
-              "Please contact the Registrar's Office.", 'error')
+        flash(NO_SERVICE_MSG, 'error')
     return redirect('/forgot/verify')
 
 
@@ -4034,9 +4330,10 @@ def forgot_new():
     return redirect('/login')
 
 
+# ---------- notifications (student bell -> Notifications page) ----------
 @app.route('/notifications/poll')
 def notifications_poll():
-    """The student's bell asks for news every few seconds. 'sig' changes when a request changes stage."""
+    """The Notifications page asks for news every few seconds. 'sig' changes when a request changes stage."""
     me = approved_users.get(session['email'])
     if me is None:
         return jsonify(items=[], sig='')
@@ -4048,9 +4345,10 @@ def notifications_poll():
 
 @app.route('/notifications/clear', methods=['POST'])
 def clear_notifications():
+    """Mark everything as read."""
     me = approved_users.get(session['email'])
     if me is not None:
-        me['notif_cleared'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        me['notif_cleared'] = now_s()
     return jsonify(ok=True)
 
 
@@ -4073,10 +4371,15 @@ if __name__ == '__main__':
     print("SLSU JGE TAGKAWAYAN — Registrar Appointment System")
     print(f"Admin login: {ADMIN_EMAIL} / {ADMIN_PASSWORD}")
     print(f"Order of Payment login: {OP_EMAIL} / {OP_PASSWORD}")
-    if sms_ready():
-        print(f"[SMS] ready (sender {SMS_SENDER}): account activation notices and forgot-password codes")
-    else:
-        print("[SMS] NOT set up: set SEMAPHORE_API_KEY. Text messages (reset codes) are printed here until then.")
+    print("[SMS]   " + (f"ready (sender {SMS_SENDER})" if sms_ready() else "NOT set up - set SEMAPHORE_API_KEY"))
+    print("[MAIL]  " + (f"ready ({SMTP_USER} via {SMTP_HOST})" if email_ready() else "NOT set up - set SMTP_USER and SMTP_PASSWORD"))
+    if not (sms_ready() or email_ready()):
+        print("        Forgot-password codes are printed in this terminal until one of them is set up.")
+    try:
+        import reportlab  # noqa: F401
+        print("[PDF]   ready (reportlab)")
+    except ImportError:
+        print("[PDF]   NOT available - run: pip install reportlab")
     print(f"[EXPORT] every Order of Payment is copied to {EXPORT_DIR}" + (" and to the web link" if EXPORT_WEBHOOK_URL else ""))
     print("Running at http://127.0.0.1:5000  (logo: static/JGE_LOGO.png)")
     app.run(debug=os.environ.get('FLASK_DEBUG') == '1', port=5000)
