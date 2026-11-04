@@ -2712,6 +2712,19 @@ document.addEventListener('click',e=>{if(!e.target.closest('.gs'))gr.classList.r
 </script></body></html>"""
 
 # ========== ORDER OF PAYMENT (Appendix 28) - cashier interface (the Order of Payment account only) ==========
+# REPLACE the old block in app.py that starts at the line
+#     # ========== ORDER OF PAYMENT (Appendix 28) - cashier interface ...
+# and ends at the line
+#     ORDERPAY_TPL = ORDERPAY_TPL.replace("THEME_PLACEHOLDER", THEME_JS)
+# with everything in this file. (It uses FA, THEME_INIT, BLUR_BG, LOGO_HTML, THEME_BTN and THEME_JS that are
+# already defined higher up in app.py.)
+#
+# The printed sheet is a copy of the photographed Appendix 28 form:
+#   * 3 copies side by side, each with the proportions of the printed form (it is NOT stretched to the full paper)
+#   * "Appendix 28" only on the Student's/Client's and Cashier's copies (2, not 3)
+#   * Entity Name, Fund Cluster, Serial No. and the date in bold
+#   * every size is in cqw (a percentage of the copy's width), so it prints the same on any paper size
+#
 # Orders are created automatically when a student sends a request. Staff: check -> edit -> print -> archive,
 # then confirm the payment. Every change is copied to EXPORT_DIR / EXPORT_WEBHOOK_URL (drive or other server).
 ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
@@ -2750,35 +2763,55 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 .filtbar input[type=date]{width:auto;min-width:150px}
 .prev{background:var(--row);border:1px solid var(--bd);border-radius:10px;padding:1rem;font-size:.78rem;line-height:1.5;white-space:pre;overflow:auto;max-height:460px;color:var(--tx);font-family:Consolas,'Courier New',monospace}
 .hsum{font-size:.8rem;color:var(--mut)}
-/* ---------- the Order of Payment sheet (always black on white, same layout as the printed form) ---------- */
-.sheet{display:grid;background:#fff;color:#000;border:1.5px solid #000;border-top:0;font-family:'Times New Roman',Times,serif;margin:0 auto}
-.sheet.noframe,.sheet.noframe .opc{border-color:transparent}
-.opc{padding:4px 12px 10px;border-right:1.5px solid #000;font-size:11.5px;line-height:1.3;display:flex;flex-direction:column;min-width:0}
+/* ---------- the Order of Payment sheet: copy of the printed Appendix 28 form (always black on white) ---------- */
+.sheet{display:grid;background:#fff;color:#000;border:2px solid #000;border-top:0;font-family:'Times New Roman',Times,serif;margin:0 auto;box-sizing:border-box}
+.sheet.noframe{border-color:transparent}
+.sheet.stack{border:0}
+.opc{container-type:inline-size;min-width:0;display:flex;background:#fff;border-right:1.5px solid #000}
 .opc:last-child{border-right:0}
-.opc p{margin:0}
-.opc .ap{text-align:center;font-style:italic;min-height:1.3em}
-.opc .cl{font-weight:700;font-size:1.02em;padding:2px 0 3px;margin:0 -12px;padding-left:12px;border-bottom:1.5px solid #000}
-.opc .hd{display:grid;grid-template-columns:1fr 1fr;gap:0 16px;margin-top:8px}
-.opc .hd div{border-bottom:1px solid #000;padding:2px 0 1px;min-height:1.7em}
-.opc .ti{text-align:center;font-weight:700;font-size:1.25em;margin:14px 0 12px;letter-spacing:.3px}
-.opc .co{margin-top:6px}
-.opc .fl{display:flex;align-items:flex-end;gap:6px;margin-top:16px}
-.opc .fl>span:first-child{white-space:nowrap}
-.opc .fl .v{flex:1;min-width:0;border-bottom:1px solid #000;text-align:center;min-height:1.5em;overflow-wrap:anywhere}
-.opc .ln{border-bottom:1px solid #000;text-align:center;min-height:1.6em;margin-top:14px;overflow-wrap:anywhere}
-.opc .cap{text-align:center;font-size:.9em}
-.opc .dep{margin-top:26px}
-.opc table.bk{width:100%;border-collapse:collapse;margin-top:6px;background:#fff;table-layout:fixed}
-.opc table.bk th,.opc table.bk td{padding:3px 4px;font-size:1em;white-space:normal;background:#fff;color:#000;text-transform:none;letter-spacing:0;position:static;font-weight:400;border:0;text-align:center}
-.opc table.bk th{text-decoration:underline;padding-bottom:6px}
-.opc table.bk td{border-bottom:1px solid #000;height:1.9em;overflow-wrap:anywhere}
-.opc table.bk td.am{text-align:right}
-.opc table.bk tr:hover td{background:#fff}
-.opc .tot{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;margin-top:6px}
-.opc .tot b{font-weight:700}.opc .tot .tv{min-width:42%;border-bottom:1px solid #000;text-align:right;min-height:1.5em}
-.opc .sg{margin-top:auto;padding-top:38px;text-align:center}
-.opc .sg b{display:block;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
-.opc .sg span{display:block;font-size:.95em}
+.sheet.stack .opc{border:2px solid #000;border-top:0}
+.sheet.stack .opc:last-child{border-right:2px solid #000}
+.sheet.noframe .opc,.sheet.stack.noframe .opc,.sheet.stack.noframe .opc:last-child{border-color:transparent}
+.oi{flex:1;min-width:0;display:flex;flex-direction:column;min-height:139cqw;font-size:2.15cqw;line-height:1.25;padding-bottom:.6cqw;font-weight:400}
+.oi p{margin:0}
+.oi .ap{text-align:right;font-style:italic;font-size:2.4cqw;padding-right:1.2cqw;min-height:1.25em}
+.oi .cl{font-weight:700;font-size:2.2cqw;padding:1.4cqw 3cqw .5cqw 3cqw;border-bottom:1.5px solid #000}
+.oi .hd{display:grid;grid-template-columns:1.55fr 1fr;gap:0 2.8cqw;padding:0 3cqw;margin-top:1.6cqw;font-weight:700;font-size:2.3cqw}
+.oi .hd div{border-bottom:1px solid #000;padding-top:1.6cqw;min-height:4.5cqw;overflow-wrap:anywhere}
+.oi .ti{text-align:center;font-weight:700;font-size:3cqw;margin-top:4.1cqw;letter-spacing:.03em}
+.oi .co{padding:0 3cqw;margin-top:4.7cqw}
+.oi .co b{display:block;font-size:2.2cqw;font-weight:700}
+.oi .co span{display:block;margin-top:2.2cqw}
+.oi .fl{display:flex;align-items:flex-end;gap:1.6cqw;padding-left:2.5cqw}
+.oi .fl>span:first-child{white-space:nowrap}
+.oi .fl .v{flex:1;min-width:0;min-height:3.4cqw;border-bottom:1px solid #000;display:flex;align-items:flex-end;justify-content:center;text-align:center;padding:0 1cqw .2cqw;overflow-wrap:anywhere}
+.oi .fl.pay{margin-top:4.2cqw}
+.oi .fl.pay>span:first-child{font-size:1.85cqw}
+.oi .fl.pay .v{font-weight:700;font-size:1.8cqw}
+.oi .fl.amt{margin-top:1.9cqw;font-size:2.2cqw}
+.oi .fl.amt .v{font-size:1.6cqw}
+.oi .fl.pur{margin-top:1.8cqw;font-size:2.3cqw}
+.oi .fl.pur .v{font-size:2cqw}
+.oi .l2{height:3.4cqw;margin-left:49cqw;border-bottom:1px solid #000}
+.oi .ln3{height:3.4cqw;border-bottom:1px solid #000}
+.oi .ad{margin-top:.4cqw;min-height:4cqw;border-bottom:1px solid #000;display:flex;align-items:flex-end;justify-content:center;text-align:center;font-size:2cqw;padding:0 3cqw .3cqw;overflow-wrap:anywhere}
+.oi .cap{text-align:center;font-size:1.95cqw;margin-top:.3cqw}
+.oi .cap.r{margin:.4cqw 0 0 49cqw}
+.oi .cap.a{margin-top:1.1cqw}
+.oi .dep{padding:0 3cqw;margin-top:12cqw}
+.oi table.bk{width:96%;margin:4cqw auto 0 .4cqw;border-collapse:separate;border-spacing:2.2cqw 1.6cqw;table-layout:fixed;background:#fff}
+.oi table.bk th,.oi table.bk td{padding:0 .6cqw;font-size:2.2cqw;font-weight:400;background:#fff;color:#000;border:0;text-align:center;white-space:normal;text-transform:none;letter-spacing:0;position:static;line-height:1.25}
+.oi table.bk th{text-decoration:underline;text-underline-offset:.35cqw;height:3.2cqw;vertical-align:bottom}
+.oi table.bk td{border-bottom:1px solid #000;height:3.7cqw;vertical-align:bottom;overflow-wrap:anywhere}
+.oi table.bk td.am{padding:0}
+.oi table.bk td.am div{display:flex;justify-content:space-between;gap:1cqw;padding:0 .6cqw}
+.oi table.bk tr:hover td{background:#fff}
+.oi table.bk tr.tt td{height:5.9cqw}
+.oi table.bk td.nb{border-bottom:0;text-align:left;font-weight:700;font-size:2.1cqw}
+.oi table.bk td.nb:empty{padding:0}
+.oi .sg{margin:auto 1cqw 0 auto;width:57cqw;padding-top:3.1cqw;text-align:center}
+.oi .sg b{display:block;font-size:2.2cqw;font-weight:700;border-bottom:1px solid #000;padding-bottom:.3cqw}
+.oi .sg span{display:block;font-size:2.3cqw;margin-top:.2cqw}
 @media(max-width:1100px){.opw{grid-template-columns:1fr}.prevwrap{position:static;max-height:none}}
 @media print{
  html,body{background:#fff!important}
@@ -2974,7 +3007,7 @@ function paintArchive(){const q=$('arcQ').value.trim().toLowerCase(),s=$('arcSt'
  const y=D.sync||{};$('syncInfo').innerHTML='<i class="fas fa-cloud-arrow-up"></i> Every order is copied automatically to <b>'+esc(y.dir||'')+'</b>'+(y.webhook?' and sent to your web link':'')+'. '+(y.last_ok?'Last copy: '+esc(y.last_ok)+'. ':'')+(y.last_error?'<span style="color:#c62828">Problem: '+esc(y.last_error)+'</span>':'')+' Use <b>Transaction History</b> to check and download the records.'}
 $('arcQ').addEventListener('input',paintArchive);$('arcSt').addEventListener('change',paintArchive);
 function openArc(o){AM=o.id;$('arcT').textContent='Order of Payment · '+(o.payor||'')+' · '+(o.document||'')+' · Serial No. '+o.serial;
- $('arcSheet').style.gridTemplateColumns='repeat(3,minmax(0,1fr))';$('arcSheet').innerHTML=COPIES.map(l=>copyHTML(l,o)).join('');
+ $('arcSheet').style.gridTemplateColumns='repeat(3,minmax(0,1fr))';$('arcSheet').innerHTML=COPIES.map((l,i)=>copyHTML(l,o,i<2)).join('');
  $('arcPaid').innerHTML=o.status==='Paid'?'<i class="fas fa-rotate-left"></i> Undo payment':'<i class="fas fa-peso-sign"></i> Payment received';
  $('arcM').classList.add('open')}
 $('arcX').addEventListener('click',()=>$('arcM').classList.remove('open'));
@@ -3015,23 +3048,28 @@ $('hPdf').addEventListener('click',async()=>{try{const r=await fetch('/orderpay/
  const b=await r.blob(),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='order-of-payment-history.pdf';
  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);toast('PDF downloaded')}catch(e){toast('Could not create the PDF')}});
 
-/* ---- the sheet (same layout as the printed form) ---- */
+/* ---- the sheet: copy of the printed Appendix 28 form ---- */
 const COPIES=["STUDENT'S/ CLIENT'S COPY","CASHIER'S COPY","COA's COPY"];
-function copyHTML(label,o){const b=(o.bank||[]).concat([{},{},{}]).slice(0,3),tot=b.reduce((s,x)=>s+(parseFloat(x.amt)||0),0),amt=parseFloat(o.amount)||0;
+/* ap = show "Appendix 28" on this copy (only the Student's and the Cashier's copy have it) */
+function copyHTML(label,o,ap){const b=(o.bank||[]).concat([{},{},{}]).slice(0,3),tot=b.reduce((s,x)=>s+(parseFloat(x.amt)||0),0),amt=parseFloat(o.amount)||0;
  const w=(o.words&&o.words.trim())?o.words:words(amt),inWords=amt>0?(w?esc(w)+' ('+money(amt)+')':'('+money(amt)+')'):esc(w);
- const rows=b.map(x=>'<tr><td>'+esc(x.no||'')+'</td><td>'+esc(x.bank||'')+'</td><td class="am">'+((x.amt===''||x.amt==null)?'':'₱ '+money(x.amt))+'</td></tr>').join('');
- return '<div class="opc"><p class="ap">Appendix 28</p><p class="cl">'+label+'</p>'
- +'<div class="hd"><div>Entity Name : <b>'+esc(o.entity)+'</b></div><div>Serial No. : <b>'+esc(o.serial)+'</b></div><div>Fund Cluster : <b>'+esc(o.fund)+'</b></div><div><b>'+esc(fdate(o.date))+'</b></div></div>'
+ const peso=v=>(v===''||v==null)?'':'<div><span>₱</span><span>'+money(v)+'</span></div>';
+ const rows=b.map(x=>'<tr><td>'+esc(x.no||'')+'</td><td>'+esc(x.bank||'')+'</td><td class="am">'+peso(x.amt)+'</td></tr>').join('');
+ const totRow='<tr class="tt"><td class="nb">Total</td><td class="nb"></td><td class="am">'+(tot>0?peso(tot):'')+'</td></tr>';
+ return '<div class="opc"><div class="oi">'
+ +'<p class="ap">'+(ap?'Appendix 28':'&nbsp;')+'</p><p class="cl">'+label+'</p>'
+ +'<div class="hd"><div>Entity Name : '+esc(o.entity)+'</div><div>Serial No. : '+esc(o.serial)+'</div><div>Fund Cluster : '+esc(o.fund)+'</div><div>'+esc(fdate(o.date))+'</div></div>'
  +'<p class="ti">ORDER OF PAYMENT</p>'
- +'<p class="co"><b>The Collecting Officer</b><br>Cash/Treasury Unit</p>'
- +'<div class="fl"><span>Please issue Official Receipt in favor of</span><span class="v">'+esc(o.payor)+'</span></div><p class="cap">(Name of Payor)</p>'
- +'<div class="ln">'+esc(o.addr)+'</div><p class="cap">(Address/Office of Payor)</p>'
- +'<div class="fl"><span>in the amount of</span><span class="v">'+inWords+'</span></div>'
- +'<div class="fl"><span>for payment of</span><span class="v">'+esc(o.purpose)+'</span></div><p class="cap">(Purpose)</p>'
+ +'<div class="co"><b>The Collecting Officer</b><span>Cash/Treasury Unit</span></div>'
+ +'<div class="fl pay"><span>Please issue Official Receipt in favor of</span><span class="v">'+esc(o.payor)+'</span></div>'
+ +'<div class="l2"></div><p class="cap r">(Name of Payor)</p>'
+ +'<div class="ad">'+esc(o.addr)+'</div><p class="cap a">(Address/Office of Payor)</p>'
+ +'<div class="fl amt"><span>in the amount of</span><span class="v">'+inWords+'</span></div>'
+ +'<div class="fl pur"><span>for payment of</span><span class="v">'+esc(o.purpose)+'</span></div>'
+ +'<div class="ln3"></div><p class="cap">(Purpose)</p>'
  +'<p class="dep">Please deposit the collections under Bank Account/s:</p>'
- +'<table class="bk"><tr><th>No.</th><th>Name of Bank</th><th>Amount</th></tr>'+rows+'</table>'
- +'<div class="tot"><b>Total</b><span class="tv">'+(tot>0?'₱ '+money(tot):'')+'</span></div>'
- +'<div class="sg"><b>'+esc(o.signer)+'</b><span>Signature over Printed Name Head of Accounting</span><span>Division/Unit/Authorized Official</span></div></div>'}
+ +'<table class="bk"><colgroup><col style="width:21%"><col style="width:36%"><col></colgroup><tr><th>No.</th><th>Name of Bank</th><th>Amount</th></tr>'+rows+totRow+'</table>'
+ +'<div class="sg"><b>'+esc(o.signer)+'</b><span>Signature over Printed Name Head of Accounting</span><span>Division/Unit/Authorized Official</span></div></div></div>'}
 
 /* ---- editor ---- */
 const PAPERS={a4:[210,297],letter:[215.9,279.4],legal:[215.9,355.6],folio:[215.9,330.2],a5:[148,210],a3:[297,420]};
@@ -3047,7 +3085,7 @@ function openOrder(id){const o=byId(id);if(!o)return;CUR=JSON.parse(JSON.stringi
  linkBank=(parseFloat(CUR.bank[0].amt)||0)===(parseFloat(CUR.amount)||0);
  $('noOrder').classList.add('hid');$('edWrap').classList.remove('hid');fillForm();head();renderSheet();$('saveSt').textContent='';go('sheet')}
 function renderSheet(){if(!CUR)return;const on=[0,1,2].filter(i=>$('c'+i).checked),sh=$('sheetEl');
- sh.innerHTML=(on.length?on:[0,1,2]).map(i=>copyHTML(COPIES[i],CUR)).join('');applyPrint()}
+ sh.innerHTML=(on.length?on:[0,1,2]).map(i=>copyHTML(COPIES[i],CUR,i<2)).join('');applyPrint()}
 document.querySelectorAll('#edWrap [data-k],#edWrap [data-b]').forEach(i=>i.addEventListener('input',()=>{
  if(i.dataset.k==='amount'){const v=i.value===''?0:parseFloat(i.value)||0;document.querySelector('[data-k="words"]').value=words(v);
   if(linkBank)document.querySelector('[data-b="0.amt"]').value=i.value}
@@ -3080,17 +3118,22 @@ function savePS(){try{const o={};PS_IDS.forEach(k=>o[k]=$(k).type==='checkbox'?$
 function loadPS(){try{const o=JSON.parse(localStorage.getItem(PSK)||'{}');PS_IDS.forEach(k=>{if(o[k]!==undefined){if($(k).type==='checkbox')$(k).checked=o[k];else $(k).value=o[k]}});[0,1,2].forEach(i=>{if(o['c'+i]!==undefined)$('c'+i).checked=o['c'+i]})}catch(e){}}
 function applyPrint(){const p=PAPERS[$('psPaper').value]||PAPERS.a4;let w=p[0],h=p[1];
  if($('psOrient').value==='landscape'){w=Math.max(p[0],p[1]);h=Math.min(p[0],p[1])}else{w=Math.min(p[0],p[1]);h=Math.max(p[0],p[1])}
- const m=parseFloat($('psMargin').value)||0,z=($('psScale').value||100)/100,n=Math.max([0,1,2].filter(i=>$('c'+i).checked).length,1),stack=$('psLayout').value==='stack';
+ const m=parseFloat($('psMargin').value)||0,z=($('psScale').value||100)/100,
+  n=Math.max([0,1,2].filter(i=>$('c'+i).checked).length,1),stack=$('psLayout').value==='stack',
+  aw=w-2*m,innerH=h-2*m,RATIO=1.39;           /* one copy is 1.39 times taller than wide, like the printed form */
  $('psScaleV').textContent=$('psScale').value;
  let st=$('pgstyle');if(!st){st=document.createElement('style');st.id='pgstyle';document.head.appendChild(st)}
  st.textContent='@page{size:'+w+'mm '+h+'mm;margin:'+m+'mm}';
- const paper=$('paper'),sh=$('sheetEl'),innerH=h-2*m;
+ const paper=$('paper'),sh=$('sheetEl');
  paper.style.width=w+'mm';paper.style.minHeight=h+'mm';paper.style.padding=m+'mm';
  const wrap=$('prevwrap'),fit=Math.min(1,(wrap.clientWidth-34)/(w*3.7795));paper.style.zoom=fit>0?fit:1;
- sh.style.zoom=z;sh.style.width=(100/z)+'%';
+ const cw=stack?Math.min(aw,innerH/RATIO):aw/3;  /* width of ONE copy in mm */
+ sh.style.zoom=z;
+ sh.style.width=((stack?cw:cw*n)/z)+'mm';       /* the sheet is NOT stretched over the whole paper */
+ sh.style.minHeight='';
  sh.style.gridTemplateColumns=stack?'minmax(0,1fr)':'repeat('+n+',minmax(0,1fr))';
- sh.style.minHeight=stack?'':(innerH/z)+'mm';
- sh.querySelectorAll('.opc').forEach((c,i,a)=>{c.style.minHeight=stack?(innerH/z-1)+'mm':'';c.style.breakAfter=(stack&&i<a.length-1)?'page':'auto'});
+ sh.querySelectorAll('.opc').forEach((c,i,a)=>{c.style.minHeight='';c.style.breakAfter=(stack&&i<a.length-1)?'page':'auto'});
+ sh.classList.toggle('stack',stack);
  sh.classList.toggle('noframe',!$('psFrame').checked)}
 PS_IDS.forEach(k=>$(k).addEventListener('input',()=>{applyPrint();savePS()}));
 window.addEventListener('resize',()=>{if($('sheet').classList.contains('active'))applyPrint()});
