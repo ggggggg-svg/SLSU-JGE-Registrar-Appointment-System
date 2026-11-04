@@ -2716,17 +2716,15 @@ document.addEventListener('click',e=>{if(!e.target.closest('.gs'))gr.classList.r
 #     # ========== ORDER OF PAYMENT (Appendix 28) - cashier interface ...
 # and ends at the line
 #     ORDERPAY_TPL = ORDERPAY_TPL.replace("THEME_PLACEHOLDER", THEME_JS)
-# with everything in this file. (It uses FA, THEME_INIT, BLUR_BG, LOGO_HTML, THEME_BTN and THEME_JS that are
-# already defined higher up in app.py.)
+# with everything in this file.
 #
-# The printed sheet is a copy of the photographed Appendix 28 form:
-#   * 3 copies side by side, each with the proportions of the printed form (it is NOT stretched to the full paper)
-#   * "Appendix 28" only on the Student's/Client's and Cashier's copies (2, not 3)
-#   * Entity Name, Fund Cluster, Serial No. and the date in bold
-#   * every size is in cqw (a percentage of the copy's width), so it prints the same on any paper size
-#
-# Orders are created automatically when a student sends a request. Staff: check -> edit -> print -> archive,
-# then confirm the payment. Every change is copied to EXPORT_DIR / EXPORT_WEBHOOK_URL (drive or other server).
+# What changed (copy of the photographed form):
+#   * the printed sheet is centered on the paper (left-right AND top-bottom)
+#   * the frame starts right UNDER the copy names (Student's/Client's, Cashier's, COA's); the names sit above the line
+#   * the frame lines and the lines between the three copies are bolder (3px), the text is slightly bolder
+#   * "Appendix 28" is on all three copies (Student's, Cashier's and COA's)
+#   * the "Total" amount has a DOUBLE line (two lines)
+#   * the name of the Head of Accounting (and the payor) is bold
 ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#003d1f">
@@ -2747,7 +2745,9 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 .opw .pn{margin-bottom:1rem}.opw .form-group{margin-bottom:.8rem}
 .prevwrap{background:#cfd6d2;border-radius:14px;padding:1rem;overflow:auto;position:sticky;top:76px;max-height:calc(100vh - 100px)}
 [data-theme=dark] .prevwrap{background:#1c2620}
-.paper{background:#fff;margin:0 auto;box-shadow:0 4px 20px rgba(0,0,0,.3);box-sizing:border-box}
+/* the paper: the sheet is centered on it (left-right and top-bottom) */
+.paper{background:#fff;margin:0 auto;box-shadow:0 4px 20px rgba(0,0,0,.3);box-sizing:border-box;display:flex;align-items:center;justify-content:center}
+.paper.stk{align-items:flex-start}
 .copies{display:flex;gap:.9rem;flex-wrap:wrap}.copies label{display:flex;align-items:center;gap:.4rem;margin:0;font-weight:500}.copies input{width:auto;min-height:0}
 .psgrid{display:grid;grid-template-columns:1fr 1fr;gap:0 .8rem}
 .stbar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.8rem}
@@ -2756,7 +2756,7 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#003d1f;color:#fff;padding:.7rem 1.2rem;border-radius:2rem;font-size:.9rem;z-index:900;box-shadow:0 6px 20px rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:opacity .25s}
 .toast.show{opacity:1}
 .mbox.xl{max-width:1080px;text-align:left}
-.arcsheet{overflow:auto;border:1px solid var(--bd);border-radius:10px;margin-bottom:.8rem}
+.arcsheet{overflow:auto;border:1px solid var(--bd);border-radius:10px;margin-bottom:.8rem;background:#fff}
 .fees td input[type=number],.fees td input[type=text]{min-height:2.3rem;padding:.35rem .6rem;font-size:.85rem}
 .fees td{white-space:normal}
 .fees td.chk{text-align:center}.fees td.chk input{width:auto;min-height:0}
@@ -2764,37 +2764,37 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 .prev{background:var(--row);border:1px solid var(--bd);border-radius:10px;padding:1rem;font-size:.78rem;line-height:1.5;white-space:pre;overflow:auto;max-height:460px;color:var(--tx);font-family:Consolas,'Courier New',monospace}
 .hsum{font-size:.8rem;color:var(--mut)}
 /* ---------- the Order of Payment sheet: copy of the printed Appendix 28 form (always black on white) ---------- */
-.sheet{display:grid;background:#fff;color:#000;border:2px solid #000;border-top:0;font-family:'Times New Roman',Times,serif;margin:0 auto;box-sizing:border-box}
-.sheet.noframe{border-color:transparent}
-.sheet.stack{border:0}
-.opc{container-type:inline-size;min-width:0;display:flex;background:#fff;border-right:1.5px solid #000}
-.opc:last-child{border-right:0}
-.sheet.stack .opc{border:2px solid #000;border-top:0}
-.sheet.stack .opc:last-child{border-right:2px solid #000}
-.sheet.noframe .opc,.sheet.stack.noframe .opc,.sheet.stack.noframe .opc:last-child{border-color:transparent}
-.oi{flex:1;min-width:0;display:flex;flex-direction:column;min-height:139cqw;font-size:2.15cqw;line-height:1.25;padding-bottom:.6cqw;font-weight:400}
+.sheet{display:grid;background:#fff;color:#000;font-family:'Times New Roman',Times,serif;margin:0 auto;box-sizing:border-box}
+.opc{container-type:inline-size;min-width:0;display:flex;background:#fff}
+.oi{flex:1;min-width:0;display:flex;flex-direction:column;min-height:139cqw;font-size:2.15cqw;line-height:1.25;font-weight:400;
+ -webkit-text-stroke:.25px #000}
 .oi p{margin:0}
-.oi .ap{text-align:right;font-style:italic;font-size:2.4cqw;padding-right:1.2cqw;min-height:1.25em}
-.oi .cl{font-weight:700;font-size:2.2cqw;padding:1.4cqw 3cqw .5cqw 3cqw;border-bottom:1.5px solid #000}
+/* "Appendix 28" and the copy name sit ABOVE the frame; the frame starts right under the copy name */
+.oi .ap{text-align:right;font-style:italic;font-size:2.4cqw;padding-right:4cqw;min-height:1.25em;font-weight:400}
+.oi .cl{font-weight:700;font-size:2.3cqw;padding:.4cqw 0 .7cqw 1cqw;letter-spacing:.01em;-webkit-text-stroke:.35px #000}
+.oi .bx{flex:1;display:flex;flex-direction:column;border-top:3px solid #000;border-left:3px solid #000;border-bottom:3px solid #000}
+.opc:last-child .bx{border-right:3px solid #000}
+.sheet.stack .opc .bx{border-right:3px solid #000}
+.sheet.noframe .bx{border-color:transparent!important}
 .oi .hd{display:grid;grid-template-columns:1.55fr 1fr;gap:0 2.8cqw;padding:0 3cqw;margin-top:1.6cqw;font-weight:700;font-size:2.3cqw}
-.oi .hd div{border-bottom:1px solid #000;padding-top:1.6cqw;min-height:4.5cqw;overflow-wrap:anywhere}
+.oi .hd div{border-bottom:1.5px solid #000;padding-top:1.6cqw;min-height:4.5cqw;overflow-wrap:anywhere}
 .oi .ti{text-align:center;font-weight:700;font-size:3cqw;margin-top:4.1cqw;letter-spacing:.03em}
 .oi .co{padding:0 3cqw;margin-top:4.7cqw}
 .oi .co b{display:block;font-size:2.2cqw;font-weight:700}
 .oi .co span{display:block;margin-top:2.2cqw}
 .oi .fl{display:flex;align-items:flex-end;gap:1.6cqw;padding-left:2.5cqw}
 .oi .fl>span:first-child{white-space:nowrap}
-.oi .fl .v{flex:1;min-width:0;min-height:3.4cqw;border-bottom:1px solid #000;display:flex;align-items:flex-end;justify-content:center;text-align:center;padding:0 1cqw .2cqw;overflow-wrap:anywhere}
+.oi .fl .v{flex:1;min-width:0;min-height:3.4cqw;border-bottom:1.5px solid #000;display:flex;align-items:flex-end;justify-content:center;text-align:center;padding:0 1cqw .2cqw;overflow-wrap:anywhere}
 .oi .fl.pay{margin-top:4.2cqw}
 .oi .fl.pay>span:first-child{font-size:1.85cqw}
-.oi .fl.pay .v{font-weight:700;font-size:1.8cqw}
+.oi .fl.pay .v{font-weight:700;font-size:1.9cqw}
 .oi .fl.amt{margin-top:1.9cqw;font-size:2.2cqw}
 .oi .fl.amt .v{font-size:1.6cqw}
 .oi .fl.pur{margin-top:1.8cqw;font-size:2.3cqw}
 .oi .fl.pur .v{font-size:2cqw}
-.oi .l2{height:3.4cqw;margin-left:49cqw;border-bottom:1px solid #000}
-.oi .ln3{height:3.4cqw;border-bottom:1px solid #000}
-.oi .ad{margin-top:.4cqw;min-height:4cqw;border-bottom:1px solid #000;display:flex;align-items:flex-end;justify-content:center;text-align:center;font-size:2cqw;padding:0 3cqw .3cqw;overflow-wrap:anywhere}
+.oi .l2{height:3.4cqw;margin-left:49cqw;border-bottom:1.5px solid #000}
+.oi .ln3{height:3.4cqw;border-bottom:1.5px solid #000}
+.oi .ad{margin-top:.4cqw;min-height:4cqw;border-bottom:1.5px solid #000;display:flex;align-items:flex-end;justify-content:center;text-align:center;font-size:2cqw;padding:0 3cqw .3cqw;overflow-wrap:anywhere}
 .oi .cap{text-align:center;font-size:1.95cqw;margin-top:.3cqw}
 .oi .cap.r{margin:.4cqw 0 0 49cqw}
 .oi .cap.a{margin-top:1.1cqw}
@@ -2802,15 +2802,19 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 .oi table.bk{width:96%;margin:4cqw auto 0 .4cqw;border-collapse:separate;border-spacing:2.2cqw 1.6cqw;table-layout:fixed;background:#fff}
 .oi table.bk th,.oi table.bk td{padding:0 .6cqw;font-size:2.2cqw;font-weight:400;background:#fff;color:#000;border:0;text-align:center;white-space:normal;text-transform:none;letter-spacing:0;position:static;line-height:1.25}
 .oi table.bk th{text-decoration:underline;text-underline-offset:.35cqw;height:3.2cqw;vertical-align:bottom}
-.oi table.bk td{border-bottom:1px solid #000;height:3.7cqw;vertical-align:bottom;overflow-wrap:anywhere}
+.oi table.bk td{border-bottom:1.5px solid #000;height:3.7cqw;vertical-align:bottom;overflow-wrap:anywhere}
 .oi table.bk td.am{padding:0}
 .oi table.bk td.am div{display:flex;justify-content:space-between;gap:1cqw;padding:0 .6cqw}
 .oi table.bk tr:hover td{background:#fff}
-.oi table.bk tr.tt td{height:5.9cqw}
+.oi table.bk tr.tt td{height:6.4cqw}
 .oi table.bk td.nb{border-bottom:0;text-align:left;font-weight:700;font-size:2.1cqw}
 .oi table.bk td.nb:empty{padding:0}
-.oi .sg{margin:auto 1cqw 0 auto;width:57cqw;padding-top:3.1cqw;text-align:center}
-.oi .sg b{display:block;font-size:2.2cqw;font-weight:700;border-bottom:1px solid #000;padding-bottom:.3cqw}
+/* Total: TWO lines (double underline) under the total amount */
+.oi table.bk td.dbl{position:relative;border-bottom:1.5px solid #000;font-weight:700}
+.oi table.bk td.dbl::after{content:"";position:absolute;left:0;right:0;bottom:-1.2cqw;border-bottom:1.5px solid #000}
+/* the name of the Head of Accounting is bold */
+.oi .sg{margin:auto 1cqw 0 auto;width:57cqw;padding-top:3.1cqw;padding-bottom:1.2cqw;text-align:center}
+.oi .sg b{display:block;font-size:2.5cqw;font-weight:800;border-bottom:1.5px solid #000;padding-bottom:.3cqw;-webkit-text-stroke:.5px #000}
 .oi .sg span{display:block;font-size:2.3cqw;margin-top:.2cqw}
 @media(max-width:1100px){.opw{grid-template-columns:1fr}.prevwrap{position:static;max-height:none}}
 @media print{
@@ -2821,7 +2825,10 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
  #sheet{display:block!important;animation:none!important}
  .opw{display:block!important}
  .prevwrap{background:#fff!important;padding:0!important;border-radius:0!important;overflow:visible!important;position:static!important;max-height:none!important}
- .paper{box-shadow:none!important;width:auto!important;min-height:0!important;padding:0!important;zoom:1!important;margin:0!important}
+ /* the sheet stays in the exact center of the printed page */
+ .paper{box-shadow:none!important;width:auto!important;min-height:0!important;height:calc(var(--ih,200mm) - 1mm)!important;padding:0!important;zoom:1!important;margin:0!important;
+  display:flex!important;align-items:center!important;justify-content:center!important}
+ .paper.stk{height:auto!important;align-items:flex-start!important}
  .sheet{min-width:0!important}
  .opc{break-inside:avoid}
  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -2895,7 +2902,7 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
       <label class="sw" style="margin:.2rem 0 .8rem"><input type="checkbox" id="psFrame" checked> Print the outer lines of the sheet</label>
       <label style="margin-bottom:.5rem">Copies to print</label>
       <div class="copies"><label><input type="checkbox" id="c0" checked> Student's / Client's</label><label><input type="checkbox" id="c1" checked> Cashier's</label><label><input type="checkbox" id="c2" checked> COA's</label></div>
-      <p class="hint">Press <strong>Print</strong> and choose your printer in the print window (the number of sets is set there too). The preview on the right is the paper that will come out.</p></div>
+      <p class="hint">Press <strong>Print</strong> and choose your printer in the print window (the number of sets is set there too). The preview on the right is the paper that will come out, with the sheet in the center.</p></div>
     </div>
    </div>
    <div class="prevwrap" id="prevwrap"><div class="paper" id="paper"><div class="sheet" id="sheetEl"></div></div></div>
@@ -2933,7 +2940,7 @@ ORDERPAY_TPL = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
  </div>
 </div>
 <div class="modal noprint" id="arcM"><div class="mbox wide xl"><button type="button" class="x" id="arcX" aria-label="Close">&times;</button>
- <h3 class="ct" id="arcT"></h3><div class="arcsheet"><div class="sheet" id="arcSheet" style="min-width:900px"></div></div>
+ <h3 class="ct" id="arcT"></h3><div class="arcsheet"><div class="sheet" id="arcSheet" style="min-width:900px;padding:8px 0"></div></div>
  <div class="mbtn" style="justify-content:flex-start;flex-wrap:wrap"><button type="button" class="btn btn-sm" id="arcOpen"><i class="fas fa-print"></i> Open &amp; print again</button>
   <button type="button" class="btn btn-sm btn-ghost" id="arcPaid"></button><button type="button" class="btn btn-sm btn-danger" id="arcDel"><i class="fas fa-trash"></i> Delete</button></div></div></div>
 <div class="toast" id="toast"></div>
@@ -3007,7 +3014,7 @@ function paintArchive(){const q=$('arcQ').value.trim().toLowerCase(),s=$('arcSt'
  const y=D.sync||{};$('syncInfo').innerHTML='<i class="fas fa-cloud-arrow-up"></i> Every order is copied automatically to <b>'+esc(y.dir||'')+'</b>'+(y.webhook?' and sent to your web link':'')+'. '+(y.last_ok?'Last copy: '+esc(y.last_ok)+'. ':'')+(y.last_error?'<span style="color:#c62828">Problem: '+esc(y.last_error)+'</span>':'')+' Use <b>Transaction History</b> to check and download the records.'}
 $('arcQ').addEventListener('input',paintArchive);$('arcSt').addEventListener('change',paintArchive);
 function openArc(o){AM=o.id;$('arcT').textContent='Order of Payment · '+(o.payor||'')+' · '+(o.document||'')+' · Serial No. '+o.serial;
- $('arcSheet').style.gridTemplateColumns='repeat(3,minmax(0,1fr))';$('arcSheet').innerHTML=COPIES.map((l,i)=>copyHTML(l,o,i<2)).join('');
+ $('arcSheet').style.gridTemplateColumns='repeat(3,minmax(0,1fr))';$('arcSheet').innerHTML=COPIES.map(l=>copyHTML(l,o)).join('');
  $('arcPaid').innerHTML=o.status==='Paid'?'<i class="fas fa-rotate-left"></i> Undo payment':'<i class="fas fa-peso-sign"></i> Payment received';
  $('arcM').classList.add('open')}
 $('arcX').addEventListener('click',()=>$('arcM').classList.remove('open'));
@@ -3050,14 +3057,15 @@ $('hPdf').addEventListener('click',async()=>{try{const r=await fetch('/orderpay/
 
 /* ---- the sheet: copy of the printed Appendix 28 form ---- */
 const COPIES=["STUDENT'S/ CLIENT'S COPY","CASHIER'S COPY","COA's COPY"];
-/* ap = show "Appendix 28" on this copy (only the Student's and the Cashier's copy have it) */
-function copyHTML(label,o,ap){const b=(o.bank||[]).concat([{},{},{}]).slice(0,3),tot=b.reduce((s,x)=>s+(parseFloat(x.amt)||0),0),amt=parseFloat(o.amount)||0;
+/* "Appendix 28" is printed on ALL three copies. The copy name sits above the frame; the frame starts right under it. */
+function copyHTML(label,o){const b=(o.bank||[]).concat([{},{},{}]).slice(0,3),tot=b.reduce((s,x)=>s+(parseFloat(x.amt)||0),0),amt=parseFloat(o.amount)||0;
  const w=(o.words&&o.words.trim())?o.words:words(amt),inWords=amt>0?(w?esc(w)+' ('+money(amt)+')':'('+money(amt)+')'):esc(w);
  const peso=v=>(v===''||v==null)?'':'<div><span>₱</span><span>'+money(v)+'</span></div>';
  const rows=b.map(x=>'<tr><td>'+esc(x.no||'')+'</td><td>'+esc(x.bank||'')+'</td><td class="am">'+peso(x.amt)+'</td></tr>').join('');
- const totRow='<tr class="tt"><td class="nb">Total</td><td class="nb"></td><td class="am">'+(tot>0?peso(tot):'')+'</td></tr>';
+ const totRow='<tr class="tt"><td class="nb">Total</td><td class="nb"></td><td class="am dbl">'+(tot>0?peso(tot):'')+'</td></tr>';
  return '<div class="opc"><div class="oi">'
- +'<p class="ap">'+(ap?'Appendix 28':'&nbsp;')+'</p><p class="cl">'+label+'</p>'
+ +'<p class="ap">Appendix 28</p><p class="cl">'+label+'</p>'
+ +'<div class="bx">'
  +'<div class="hd"><div>Entity Name : '+esc(o.entity)+'</div><div>Serial No. : '+esc(o.serial)+'</div><div>Fund Cluster : '+esc(o.fund)+'</div><div>'+esc(fdate(o.date))+'</div></div>'
  +'<p class="ti">ORDER OF PAYMENT</p>'
  +'<div class="co"><b>The Collecting Officer</b><span>Cash/Treasury Unit</span></div>'
@@ -3069,7 +3077,8 @@ function copyHTML(label,o,ap){const b=(o.bank||[]).concat([{},{},{}]).slice(0,3)
  +'<div class="ln3"></div><p class="cap">(Purpose)</p>'
  +'<p class="dep">Please deposit the collections under Bank Account/s:</p>'
  +'<table class="bk"><colgroup><col style="width:21%"><col style="width:36%"><col></colgroup><tr><th>No.</th><th>Name of Bank</th><th>Amount</th></tr>'+rows+totRow+'</table>'
- +'<div class="sg"><b>'+esc(o.signer)+'</b><span>Signature over Printed Name Head of Accounting</span><span>Division/Unit/Authorized Official</span></div></div></div>'}
+ +'<div class="sg"><b>'+esc(o.signer)+'</b><span>Signature over Printed Name Head of Accounting</span><span>Division/Unit/Authorized Official</span></div>'
+ +'</div></div></div>'}
 
 /* ---- editor ---- */
 const PAPERS={a4:[210,297],letter:[215.9,279.4],legal:[215.9,355.6],folio:[215.9,330.2],a5:[148,210],a3:[297,420]};
@@ -3085,7 +3094,7 @@ function openOrder(id){const o=byId(id);if(!o)return;CUR=JSON.parse(JSON.stringi
  linkBank=(parseFloat(CUR.bank[0].amt)||0)===(parseFloat(CUR.amount)||0);
  $('noOrder').classList.add('hid');$('edWrap').classList.remove('hid');fillForm();head();renderSheet();$('saveSt').textContent='';go('sheet')}
 function renderSheet(){if(!CUR)return;const on=[0,1,2].filter(i=>$('c'+i).checked),sh=$('sheetEl');
- sh.innerHTML=(on.length?on:[0,1,2]).map(i=>copyHTML(COPIES[i],CUR,i<2)).join('');applyPrint()}
+ sh.innerHTML=(on.length?on:[0,1,2]).map(i=>copyHTML(COPIES[i],CUR)).join('');applyPrint()}
 document.querySelectorAll('#edWrap [data-k],#edWrap [data-b]').forEach(i=>i.addEventListener('input',()=>{
  if(i.dataset.k==='amount'){const v=i.value===''?0:parseFloat(i.value)||0;document.querySelector('[data-k="words"]').value=words(v);
   if(linkBank)document.querySelector('[data-b="0.amt"]').value=i.value}
@@ -3120,16 +3129,19 @@ function applyPrint(){const p=PAPERS[$('psPaper').value]||PAPERS.a4;let w=p[0],h
  if($('psOrient').value==='landscape'){w=Math.max(p[0],p[1]);h=Math.min(p[0],p[1])}else{w=Math.min(p[0],p[1]);h=Math.max(p[0],p[1])}
  const m=parseFloat($('psMargin').value)||0,z=($('psScale').value||100)/100,
   n=Math.max([0,1,2].filter(i=>$('c'+i).checked).length,1),stack=$('psLayout').value==='stack',
-  aw=w-2*m,innerH=h-2*m,RATIO=1.39;           /* one copy is 1.39 times taller than wide, like the printed form */
+  aw=w-2*m,innerH=h-2*m,RATIO=1.39;           /* one copy is about 1.39 times taller than wide, like the printed form */
  $('psScaleV').textContent=$('psScale').value;
  let st=$('pgstyle');if(!st){st=document.createElement('style');st.id='pgstyle';document.head.appendChild(st)}
  st.textContent='@page{size:'+w+'mm '+h+'mm;margin:'+m+'mm}';
  const paper=$('paper'),sh=$('sheetEl');
  paper.style.width=w+'mm';paper.style.minHeight=h+'mm';paper.style.padding=m+'mm';
+ paper.style.setProperty('--ih',innerH+'mm');          /* used by the print rule that centers the sheet on the page */
+ paper.classList.toggle('stk',stack);
  const wrap=$('prevwrap'),fit=Math.min(1,(wrap.clientWidth-34)/(w*3.7795));paper.style.zoom=fit>0?fit:1;
- const cw=stack?Math.min(aw,innerH/RATIO):aw/3;  /* width of ONE copy in mm */
+ /* width of ONE copy in mm: it must fit the paper both in width and in height (label + frame) */
+ const cw=stack?Math.min(aw,innerH/RATIO):Math.min(aw/n,innerH/RATIO);
  sh.style.zoom=z;
- sh.style.width=((stack?cw:cw*n)/z)+'mm';       /* the sheet is NOT stretched over the whole paper */
+ sh.style.width=((stack?cw:cw*n)/z)+'mm';       /* the sheet is NOT stretched over the whole paper; it is centered */
  sh.style.minHeight='';
  sh.style.gridTemplateColumns=stack?'minmax(0,1fr)':'repeat('+n+',minmax(0,1fr))';
  sh.querySelectorAll('.opc').forEach((c,i,a)=>{c.style.minHeight='';c.style.breakAfter=(stack&&i<a.length-1)?'page':'auto'});
